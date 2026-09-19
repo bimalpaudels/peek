@@ -37,7 +37,7 @@ func NewPythonRunner() (*PythonRunner, error) {
 	}
 
 	if uvPath == "" {
-		return nil, fmt.Errorf("sc requires 'uv' to run Python, but 'uv' was not found on PATH.\nPlease install uv: curl -LsSf https://astral.sh/uv/install.sh | sh")
+		return nil, fmt.Errorf("peek requires 'uv' to run Python, but 'uv' was not found on PATH.\nPlease install uv: curl -LsSf https://astral.sh/uv/install.sh | sh")
 	}
 
 	return &PythonRunner{UVPath: uvPath}, nil

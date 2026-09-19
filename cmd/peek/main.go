@@ -9,24 +9,24 @@ import (
 	"strings"
 	"time"
 
-	"sc/internal/parser"
-	"sc/internal/runner"
+	"peek/internal/parser"
+	"peek/internal/runner"
 )
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `sc: universal fast in-file scratchpad
+	fmt.Fprintf(os.Stderr, `peek: universal fast in-file scratchpad
 
 Usage:
-  sc <file:line>             Evaluate block at line number (e.g. sc main.py:15)
-  sc <file> <line>           Evaluate block at line number (e.g. sc main.py 15)
-  sc <file>                  Evaluate all blocks top-to-bottom
-  sc <file> --clean          Strip all comment outputs from file
+  peek <file:line>             Evaluate statement/block at line number (e.g. peek main.py:15)
+  peek <file> <line>           Evaluate statement/block at line number (e.g. peek main.py 15)
+  peek <file>                  Evaluate all statements top-to-bottom
+  peek <file> --clean          Strip all comment outputs from file
 
 Options:
-  --clean                    Remove all '# =>' output comments
-  --max-lines int            Max output lines per block (default 30)
-  --timeout int              Execution timeout in seconds (default 10)
-  -h, --help                 Show this help message
+  --clean                      Remove all scratchpad output comments
+  --max-lines int              Max output lines per statement (default 30)
+  --timeout int                Execution timeout in seconds (default 10)
+  -h, --help                   Show this help message
 `)
 }
 
@@ -87,13 +87,13 @@ func main() {
 
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sc error: invalid path: %v\n", err)
+		fmt.Fprintf(os.Stderr, "peek error: invalid path: %v\n", err)
 		os.Exit(1)
 	}
 
 	contentBytes, err := os.ReadFile(absPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sc error: file not found: %s\n", filePath)
+		fmt.Fprintf(os.Stderr, "peek error: file not found: %s\n", filePath)
 		os.Exit(1)
 	}
 	content := string(contentBytes)
@@ -101,7 +101,7 @@ func main() {
 	if clean {
 		cleaned := parser.CleanOutputs(content)
 		if err := parser.AtomicWrite(absPath, cleaned); err != nil {
-			fmt.Fprintf(os.Stderr, "sc error writing file: %v\n", err)
+			fmt.Fprintf(os.Stderr, "peek error writing file: %v\n", err)
 			os.Exit(1)
 		}
 		fmt.Printf("Cleaned output comments from %s\n", filePath)
@@ -110,7 +110,7 @@ func main() {
 
 	pyRunner, err := runner.NewPythonRunner()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sc error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "peek error: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -119,17 +119,17 @@ func main() {
 
 	result, err := pyRunner.Execute(ctx, absPath, content, lineNo, maxLines)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sc runner error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "peek runner error: %v\n", err)
 		os.Exit(1)
 	}
 
 	if result.SyntaxError != nil {
-		fmt.Fprintf(os.Stderr, "sc: %s\n", result.SyntaxError.Msg)
+		fmt.Fprintf(os.Stderr, "peek: %s\n", result.SyntaxError.Msg)
 		os.Exit(1)
 	}
 
 	if result.Error != "" {
-		fmt.Fprintf(os.Stderr, "sc error: %s\n", result.Error)
+		fmt.Fprintf(os.Stderr, "peek error: %s\n", result.Error)
 		os.Exit(1)
 	}
 
@@ -139,12 +139,12 @@ func main() {
 
 	updated, err := parser.ApplyBlockOutputs(content, result.Blocks)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "sc error updating output: %v\n", err)
+		fmt.Fprintf(os.Stderr, "peek error updating output: %v\n", err)
 		os.Exit(1)
 	}
 
 	if err := parser.AtomicWrite(absPath, updated); err != nil {
-		fmt.Fprintf(os.Stderr, "sc error writing file: %v\n", err)
+		fmt.Fprintf(os.Stderr, "peek error writing file: %v\n", err)
 		os.Exit(1)
 	}
 }

@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	"sc/internal/runner"
+	"peek/internal/runner"
 )
 
 // isOutputComment reports whether the trimmed line is a scratchpad output comment.
@@ -249,7 +249,7 @@ func AtomicWrite(filePath string, content string) error {
 	}
 
 	dir := filepath.Dir(targetPath)
-	tmpFile, err := os.CreateTemp(dir, ".sc_tmp_*")
+	tmpFile, err := os.CreateTemp(dir, ".peek_tmp_*")
 	if err != nil {
 		return err
 	}

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"sc/internal/runner"
+	"peek/internal/runner"
 )
 
 func TestApplyBlockOutputs(t *testing.T) {

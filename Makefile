@@ -1,6 +1,6 @@
-# sc - Universal Fast In-File Scratchpad
-BINARY_NAME := sc
-CMD_DIR     := ./cmd/sc
+# peek - Universal Fast In-File Scratchpad
+BINARY_NAME := peek
+CMD_DIR     := ./cmd/peek
 
 # Installation directory (defaults to ~/.local/bin, override via: make install INSTALL_DIR=/usr/local/bin)
 INSTALL_DIR ?= $(HOME)/.local/bin
