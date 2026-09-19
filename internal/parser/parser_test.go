@@ -9,94 +9,110 @@ import (
 	"sc/internal/runner"
 )
 
-const sampleCode = `x = 10
+func TestApplyBlockOutputs(t *testing.T) {
+	code := `x = 10
+x + 5
+
 y = 20
-x + y
+print("hello")
+y * 2`
 
-def add(a, b):
-    return a + b
-add(x, y)
-# => Out: 30
-
-z = add(x, y) * 2
-print(f"Total: {z}")`
-
-func TestParseBlocks(t *testing.T) {
-	blocks := ParseBlocks(sampleCode)
-	if len(blocks) != 3 {
-		t.Fatalf("expected 3 blocks, got %d", len(blocks))
+	results := []runner.BlockResult{
+		{
+			Index:     0,
+			StartLine: 2,
+			EndLine:   2,
+			Outputs:   []string{"➜ 15"},
+		},
+		{
+			Index:     1,
+			StartLine: 4,
+			EndLine:   5,
+			Outputs:   []string{"❯ hello", "❯ world"},
+		},
+		{
+			Index:     2,
+			StartLine: 6,
+			EndLine:   6,
+			Outputs:   []string{"➜ 40"},
+		},
 	}
 
-	if blocks[0].Index != 0 || !strings.Contains(blocks[0].Code, "x = 10") {
-		t.Errorf("unexpected block 0: %+v", blocks[0])
-	}
-	if len(blocks[0].OutputLines) != 0 {
-		t.Errorf("expected empty outputs for block 0, got %v", blocks[0].OutputLines)
-	}
-
-	if blocks[1].Index != 1 || !strings.Contains(blocks[1].Code, "def add") {
-		t.Errorf("unexpected block 1: %+v", blocks[1])
-	}
-	if len(blocks[1].OutputLines) != 1 || blocks[1].OutputLines[0] != "# => Out: 30" {
-		t.Errorf("unexpected outputs for block 1: %v", blocks[1].OutputLines)
-	}
-
-	if blocks[2].Index != 2 || !strings.Contains(blocks[2].Code, "z = add") {
-		t.Errorf("unexpected block 2: %+v", blocks[2])
-	}
-}
-
-func TestFindBlockByLine(t *testing.T) {
-	blocks := ParseBlocks(sampleCode)
-
-	b0 := FindBlockByLine(blocks, 2)
-	if b0 == nil || b0.Index != 0 {
-		t.Errorf("expected block 0 for line 2, got %v", b0)
-	}
-
-	b1 := FindBlockByLine(blocks, 6)
-	if b1 == nil || b1.Index != 1 {
-		t.Errorf("expected block 1 for line 6, got %v", b1)
-	}
-
-	// Blank line 4 should map to preceding block 0
-	bBlank := FindBlockByLine(blocks, 4)
-	if bBlank == nil || bBlank.Index != 0 {
-		t.Errorf("expected block 0 for line 4, got %v", bBlank)
-	}
-}
-
-func TestUpdateBlockOutput(t *testing.T) {
-	updated, err := UpdateBlockOutput(sampleCode, 0, []string{"Out: 30"})
+	updated, err := ApplyBlockOutputs(code, results)
 	if err != nil {
-		t.Fatalf("UpdateBlockOutput failed: %v", err)
+		t.Fatalf("ApplyBlockOutputs failed: %v", err)
 	}
 
-	blocks := ParseBlocks(updated)
-	if len(blocks[0].OutputLines) != 1 || blocks[0].OutputLines[0] != "# => Out: 30" {
-		t.Errorf("expected updated output on block 0, got %v", blocks[0].OutputLines)
+	// Block 0 and 2 are short single-line expressions -> placed inline
+	// Block 1 has multiple output lines -> placed below
+	expected := `x = 10
+x + 5  # ➜ 15
+
+y = 20
+print("hello")
+# ❯ hello
+# ❯ world
+y * 2  # ➜ 40`
+
+	if updated != expected {
+		t.Errorf("updated content mismatch:\nGOT:\n%s\nWANT:\n%s", updated, expected)
 	}
-	// Block 1 output must remain intact
-	if len(blocks[1].OutputLines) != 1 || blocks[1].OutputLines[0] != "# => Out: 30" {
-		t.Errorf("block 1 output corrupted: %v", blocks[1].OutputLines)
+
+	// Now test re-running block 2 with an updated output
+	results2 := []runner.BlockResult{
+		{
+			Index:     2,
+			StartLine: 8,
+			EndLine:   8,
+			Outputs:   []string{"➜ 999"},
+		},
+	}
+	updated2, err := ApplyBlockOutputs(updated, results2)
+	if err != nil {
+		t.Fatalf("ApplyBlockOutputs failed on re-run: %v", err)
+	}
+
+	expected2 := `x = 10
+x + 5  # ➜ 15
+
+y = 20
+print("hello")
+# ❯ hello
+# ❯ world
+y * 2  # ➜ 999`
+
+	if updated2 != expected2 {
+		t.Errorf("re-run content mismatch:\nGOT:\n%s\nWANT:\n%s", updated2, expected2)
 	}
 }
 
 func TestCleanOutputs(t *testing.T) {
-	cleaned := CleanOutputs(sampleCode)
-	if strings.Contains(cleaned, "# => Out: 30") {
-		t.Errorf("clean failed to remove comment: %s", cleaned)
-	}
-	blocks := ParseBlocks(cleaned)
-	for _, b := range blocks {
-		if len(b.OutputLines) > 0 {
-			t.Errorf("expected 0 outputs in cleaned code, block %d has %v", b.Index, b.OutputLines)
+	code := `x = 10  # ➜ 10
+print("run")
+# ❯ run
+# => Out: 10
+# ✕ Error: failed
+y = 20`
+
+	cleaned := CleanOutputs(code)
+
+	for _, bad := range []string{"# ➜ 10", "# ❯ run", "# => Out: 10", "# ✕ Error: failed"} {
+		if strings.Contains(cleaned, bad) {
+			t.Errorf("CleanOutputs failed to strip %q; got:\n%s", bad, cleaned)
 		}
+	}
+
+	expected := `x = 10
+print("run")
+y = 20`
+
+	if strings.TrimSpace(cleaned) != expected {
+		t.Errorf("CleanOutputs mismatch:\nGOT:\n%s\nWANT:\n%s", cleaned, expected)
 	}
 }
 
 func TestCRLFHandling(t *testing.T) {
-	crlfCode := "x = 1\r\n\r\ny = 2\r\n# => Out: 2\r\n"
+	crlfCode := "x = 1\r\n# => Out: 1\r\ny = 2\r\n"
 	cleaned := CleanOutputs(crlfCode)
 	if !strings.Contains(cleaned, "\r\n") {
 		t.Errorf("expected CRLF line endings preserved in CleanOutputs")
@@ -105,15 +121,23 @@ func TestCRLFHandling(t *testing.T) {
 		t.Errorf("expected output comments removed")
 	}
 
-	updated, err := UpdateBlockOutput(crlfCode, 0, []string{"Out: 1"})
+	results := []runner.BlockResult{
+		{
+			Index:     0,
+			StartLine: 1,
+			EndLine:   1,
+			Outputs:   []string{"➜ 42"},
+		},
+	}
+	applied, err := ApplyBlockOutputs(cleaned, results)
 	if err != nil {
-		t.Fatalf("UpdateBlockOutput failed: %v", err)
+		t.Fatalf("ApplyBlockOutputs failed on CRLF: %v", err)
 	}
-	if !strings.Contains(updated, "\r\n") {
-		t.Errorf("expected CRLF line endings preserved in UpdateBlockOutput")
+	if !strings.Contains(applied, "\r\n") {
+		t.Errorf("expected CRLF line endings preserved in ApplyBlockOutputs")
 	}
-	if strings.Contains(updated, "\r\r") {
-		t.Errorf("unexpected carriage return duplication in UpdateBlockOutput")
+	if strings.Contains(applied, "\r\r") {
+		t.Errorf("unexpected carriage return duplication in ApplyBlockOutputs")
 	}
 }
 
@@ -121,12 +145,11 @@ func TestAtomicWritePermissionsAndSymlink(t *testing.T) {
 	tmpDir := t.TempDir()
 	targetFile := filepath.Join(tmpDir, "script.py")
 
-	// Create a file with 0755 executable permissions
+	// Create file with 0755 permissions
 	initialContent := "print('hello')\n"
 	if err := os.WriteFile(targetFile, []byte(initialContent), 0755); err != nil {
 		t.Fatalf("failed to create target file: %v", err)
 	}
-	// Explicitly chmod to ensure umask didn't mask permissions
 	if err := os.Chmod(targetFile, 0755); err != nil {
 		t.Fatalf("failed to chmod target file: %v", err)
 	}
@@ -168,135 +191,5 @@ func TestAtomicWritePermissionsAndSymlink(t *testing.T) {
 	}
 	if targetFi.Mode().Perm() != 0755 {
 		t.Errorf("target file perm = %v, want %v", targetFi.Mode().Perm(), 0755)
-	}
-}
-
-func TestSmartBlockParsing(t *testing.T) {
-	code := `def complex_function(items):
-    total = 0
-
-    # Indented loop with blank lines
-    for item in items:
-        val = item * 2
-
-        total += val
-
-    return total
-
-matrix = [
-    [1, 2],
-
-    [3, 4],
-]
-
-"""
-Multi-line docstring
-
-with blank lines
-"""
-
-try:
-    res = 10 / 2
-
-except ZeroDivisionError:
-    res = 0
-
-res`
-
-	blocks := ParseBlocks(code)
-	// Expect 5 blocks:
-	// 0: def complex_function...
-	// 1: matrix = [...]
-	// 2: """..."""
-	// 3: try ... except
-	// 4: res
-	if len(blocks) != 5 {
-		t.Fatalf("expected 5 blocks, got %d", len(blocks))
-	}
-
-	if !strings.Contains(blocks[0].Code, "def complex_function") || !strings.Contains(blocks[0].Code, "return total") {
-		t.Errorf("block 0 corrupted: %s", blocks[0].Code)
-	}
-
-	if !strings.Contains(blocks[1].Code, "matrix = [") || !strings.Contains(blocks[1].Code, "[3, 4],") {
-		t.Errorf("block 1 corrupted: %s", blocks[1].Code)
-	}
-
-	if !strings.Contains(blocks[2].Code, "Multi-line docstring") {
-		t.Errorf("block 2 corrupted: %s", blocks[2].Code)
-	}
-
-	if !strings.Contains(blocks[3].Code, "try:") || !strings.Contains(blocks[3].Code, "except ZeroDivisionError:") {
-		t.Errorf("block 3 corrupted: %s", blocks[3].Code)
-	}
-
-	if strings.TrimSpace(blocks[4].Code) != "res" {
-		t.Errorf("block 4 corrupted: %s", blocks[4].Code)
-	}
-}
-
-func TestApplyBlockOutputs(t *testing.T) {
-	code := `x = 10
-x + 5
-
-y = 20
-y * 2`
-
-	results := []runner.BlockResult{
-		{
-			Index:     0,
-			StartLine: 1,
-			EndLine:   2,
-			Outputs:   []string{"Out: 15"},
-		},
-		{
-			Index:     1,
-			StartLine: 4,
-			EndLine:   5,
-			Outputs:   []string{"Out: 40"},
-		},
-	}
-
-	updated, err := ApplyBlockOutputs(code, results)
-	if err != nil {
-		t.Fatalf("ApplyBlockOutputs failed: %v", err)
-	}
-
-	expected := `x = 10
-x + 5
-# => Out: 15
-
-y = 20
-y * 2
-# => Out: 40`
-
-	if updated != expected {
-		t.Errorf("updated content mismatch:\nGOT:\n%s\nWANT:\n%s", updated, expected)
-	}
-
-	// Now test updating block 1 only (with an existing output on block 0)
-	results2 := []runner.BlockResult{
-		{
-			Index:     1,
-			StartLine: 5,
-			EndLine:   7,
-			Outputs:   []string{"Out: 999"},
-		},
-	}
-	updated2, err := ApplyBlockOutputs(updated, results2)
-	if err != nil {
-		t.Fatalf("ApplyBlockOutputs failed on re-run: %v", err)
-	}
-
-	expected2 := `x = 10
-x + 5
-# => Out: 15
-
-y = 20
-y * 2
-# => Out: 999`
-
-	if updated2 != expected2 {
-		t.Errorf("re-run content mismatch:\nGOT:\n%s\nWANT:\n%s", updated2, expected2)
 	}
 }
