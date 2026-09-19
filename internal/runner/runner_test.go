@@ -245,3 +245,43 @@ x + y
 		t.Errorf("expected matching outputs:\nA: %s\nB: %s", outA, outB)
 	}
 }
+
+func TestPythonRunner_DependencySlicing(t *testing.T) {
+	r, err := NewPythonRunner()
+	if err != nil {
+		t.Skipf("skipping python runner test: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Upstream statement has a deliberate runtime crash (1 / 0).
+	// Target statement calculate(6, 7) only depends on def calculate.
+	// With AST dependency slicing, the crash must be completely bypassed.
+	source := `unrelated_error = 1 / 0
+
+def calculate(a, b):
+    return a * b
+
+calculate(6, 7)
+`
+	targetLine := 6
+	res, err := r.Execute(ctx, "test.py", source, &targetLine, 30)
+	checkRunnerErr(t, err)
+
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(res.Blocks))
+	}
+
+	found := false
+	for _, out := range res.Blocks[0].Outputs {
+		if strings.Contains(out, "➜ 42") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected '➜ 42' via dependency slicing, got %v", res.Blocks[0].Outputs)
+	}
+}
+
