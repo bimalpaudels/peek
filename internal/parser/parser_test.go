@@ -86,13 +86,13 @@ func TestCleanOutputs(t *testing.T) {
 	code := `x = 10  # ➜ 10
 print("run")
 # ❯ run
-# => Out: 10
-# ✕ Error: failed
+# => 10
+# ✕ division by zero
 y = 20`
 
 	cleaned := CleanOutputs(code)
 
-	for _, bad := range []string{"# ➜ 10", "# ❯ run", "# => Out: 10", "# ✕ Error: failed"} {
+	for _, bad := range []string{"# ➜ 10", "# ❯ run", "# => 10", "# ✕ division by zero"} {
 		if strings.Contains(cleaned, bad) {
 			t.Errorf("CleanOutputs failed to strip %q; got:\n%s", bad, cleaned)
 		}
@@ -108,7 +108,7 @@ y = 20`
 }
 
 func TestCRLFHandling(t *testing.T) {
-	crlfCode := "x = 1\r\n# => Out: 1\r\ny = 2\r\n"
+	crlfCode := "x = 1\r\n# => 1\r\ny = 2\r\n"
 	cleaned := CleanOutputs(crlfCode)
 	if !strings.Contains(cleaned, "\r\n") {
 		t.Errorf("expected CRLF line endings preserved in CleanOutputs")
@@ -188,3 +188,37 @@ func TestAtomicWritePermissionsAndSymlink(t *testing.T) {
 		t.Errorf("target file perm = %v, want %v", targetFi.Mode().Perm(), 0755)
 	}
 }
+
+func TestApplyBlockOutputs_EmptyOutputsCleansStaleComments(t *testing.T) {
+	code := `x = 10  # ➜ 999
+y = 20
+# ❯ old output
+z = 30`
+
+	results := []runner.BlockResult{
+		{
+			StartLine: 1,
+			EndLine:   1,
+			Outputs:   nil, // statement now produces no output
+		},
+		{
+			StartLine: 2,
+			EndLine:   3,
+			Outputs:   nil, // multiline statement now produces no output
+		},
+	}
+
+	updated, err := ApplyBlockOutputs(code, results)
+	if err != nil {
+		t.Fatalf("ApplyBlockOutputs failed: %v", err)
+	}
+
+	expected := `x = 10
+y = 20
+z = 30`
+
+	if updated != expected {
+		t.Errorf("expected stale comments wiped:\nGOT:\n%s\nWANT:\n%s", updated, expected)
+	}
+}
+

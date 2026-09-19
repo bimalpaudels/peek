@@ -21,9 +21,7 @@ func isOutputComment(line string) bool {
 		strings.HasPrefix(rest, "➜") ||
 		strings.HasPrefix(rest, "❯") ||
 		strings.HasPrefix(rest, "✕") ||
-		strings.HasPrefix(rest, "…") ||
-		strings.HasPrefix(rest, "Out:") ||
-		strings.HasPrefix(rest, "Error:")
+		strings.HasPrefix(rest, "…")
 }
 
 // formatOutputComment ensures the output line is prefixed with '# '.
@@ -120,9 +118,10 @@ func ApplyBlockOutputs(content string, blockResults []runner.BlockResult) (strin
 		startIdx := b.StartLine - 1
 		endIdx := b.EndLine
 
-		// Clean any previous inline output comment on start line
-		cleanStartLine, _ := stripInlineOutputComment(lines[startIdx])
-		lines[startIdx] = cleanStartLine
+		// Clean any previous inline output comments across statement lines
+		for i := startIdx; i < endIdx; i++ {
+			lines[i], _ = stripInlineOutputComment(lines[i])
+		}
 
 		codeLines := splitCodeAndOutput(lines[startIdx:endIdx])
 

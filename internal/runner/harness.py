@@ -7,12 +7,38 @@ import sys
 import traceback
 
 
+OUTPUT_PREFIXES = ("=>", "➜", "❯", "✕", "…")
+
+
 def _is_output_line(line):
     s = line.strip()
     if not s.startswith("#"):
         return False
     rest = s[1:].strip()
-    return any(rest.startswith(p) for p in ("=>", "➜", "❯", "✕", "…"))
+    return any(rest.startswith(p) for p in OUTPUT_PREFIXES)
+
+
+def _has_output_comment(line):
+    s = line.strip()
+    if not s:
+        return False
+    if s.startswith("#") and any(s[1:].strip().startswith(p) for p in OUTPUT_PREFIXES):
+        return True
+    if "#" in line:
+        idx = line.rfind("#")
+        comment = line[idx + 1 :].strip()
+        if any(comment.startswith(p) for p in OUTPUT_PREFIXES):
+            return True
+    return False
+
+
+def _get_root_name(node):
+    curr = node
+    while isinstance(curr, (ast.Attribute, ast.Subscript)):
+        curr = curr.value
+    if isinstance(curr, ast.Name):
+        return curr.id
+    return None
 
 
 def _format_outputs(std_lines, result_repr, error_lines, max_lines):
@@ -87,22 +113,32 @@ def _extract_symbols(node):
                 reads.add(sub.id)
         return defines, reads, is_side_effect
 
-    # 4. Method calls on objects (e.g. items.append(x) mutates items)
-    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-        call = node.value
-        if isinstance(call.func, ast.Attribute):
-            curr = call.func.value
-            while isinstance(curr, ast.Attribute):
-                curr = curr.value
-            if isinstance(curr, ast.Name):
-                defines.add(curr.id)
-                reads.add(curr.id)
+    # 4. Detect mutations on objects and collections (e.g. arr[0] = 1, obj.attr = 2, matrix[i].append(x))
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Assign):
+            for t in sub.targets:
+                root = _get_root_name(t)
+                if root:
+                    defines.add(root)
+                    reads.add(root)
+        elif isinstance(sub, (ast.AugAssign, ast.AnnAssign)):
+            root = _get_root_name(sub.target)
+            if root:
+                defines.add(root)
+                reads.add(root)
+        elif isinstance(sub, ast.Delete):
+            for t in sub.targets:
+                root = _get_root_name(t)
+                if root:
+                    defines.add(root)
+                    reads.add(root)
+        elif isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute):
+            root = _get_root_name(sub.func.value)
+            if root:
+                defines.add(root)
+                reads.add(root)
 
-    # 5. Augmented assignments (e.g. x += 1 loads target)
-    if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
-        reads.add(node.target.id)
-
-    # 6. General fallback for all assignments, expressions, and statements
+    # 5. General fallback for all assignments, expressions, and statements
     for sub in ast.walk(node):
         if isinstance(sub, ast.Name):
             if isinstance(sub.ctx, ast.Store):
@@ -279,7 +315,11 @@ def run():
         all_std = captured_io.splitlines() if captured_io else []
         outputs = _format_outputs(all_std, result_repr, error_lines, max_lines)
 
-        has_existing_outputs = stmt["end_line"] > stmt["node"].end_lineno
+        has_existing_outputs = stmt["end_line"] > stmt["node"].end_lineno or any(
+            _has_output_comment(source_lines[ln - 1])
+            for ln in range(stmt["start_line"], stmt["end_line"] + 1)
+            if ln - 1 < len(source_lines)
+        )
         if target_idx is not None or outputs or has_existing_outputs:
             results.append({
                 "start_line": stmt["start_line"],

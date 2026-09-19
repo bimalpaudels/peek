@@ -162,3 +162,42 @@ calculate(10, 5)
 		t.Fatalf("expected 0 blocks for function definition line, got %d", len(res.Blocks))
 	}
 }
+
+func TestPythonRunner_SubscriptMutationSlicing(t *testing.T) {
+	source := `arr = [1, 2, 3]
+arr[0] = 999
+arr
+`
+	targetLine := 3
+	res := runTest(t, source, &targetLine)
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "999") {
+		t.Errorf("expected subscript mutation to be included, got %v", res.Blocks)
+	}
+}
+
+func TestPythonRunner_AttributeMutationSlicing(t *testing.T) {
+	source := `class Box:
+    pass
+
+b = Box()
+b.val = 42
+b.val
+`
+	targetLine := 6
+	res := runTest(t, source, &targetLine)
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "42") {
+		t.Errorf("expected attribute mutation to be included, got %v", res.Blocks)
+	}
+}
+
+func TestPythonRunner_CleanStaleInlineComment(t *testing.T) {
+	source := "x = 10  # ➜ 999\n"
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 block reporting statement with stale comment, got %d", len(res.Blocks))
+	}
+	if len(res.Blocks[0].Outputs) != 0 {
+		t.Errorf("expected 0 outputs for assignment, got %v", res.Blocks[0].Outputs)
+	}
+}
+

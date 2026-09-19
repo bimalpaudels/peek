@@ -91,6 +91,9 @@ func (p *PythonRunner) Execute(
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Run(); err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("execution timed out")
+		}
 		errOutput := stderrBuf.String()
 		if strings.TrimSpace(errOutput) == "" {
 			errOutput = stdoutBuf.String()
