@@ -2,6 +2,7 @@ import ast
 import contextlib
 import io
 import json
+import os
 import sys
 import traceback
 
@@ -150,6 +151,11 @@ def run():
     source = payload.get("source") or ""
     target_line = payload.get("target_line")
     max_lines = payload.get("max_lines") or 30
+
+    if file_path and file_path != "<scratchpad>":
+        file_dir = os.path.dirname(os.path.abspath(file_path))
+        if file_dir and file_dir not in sys.path:
+            sys.path.insert(0, file_dir)
 
     if not source.strip():
         print(json.dumps({"blocks": []}))

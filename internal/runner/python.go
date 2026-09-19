@@ -79,9 +79,9 @@ func (p *PythonRunner) Execute(
 	harnessPath := getHarnessPath()
 	var cmd *exec.Cmd
 	if harnessPath != "" {
-		cmd = exec.CommandContext(ctx, p.UVPath, "run", "--no-project", "python", harnessPath)
+		cmd = exec.CommandContext(ctx, p.UVPath, "run", "python", harnessPath)
 	} else {
-		cmd = exec.CommandContext(ctx, p.UVPath, "run", "--no-project", "python", "-c", pythonHarness)
+		cmd = exec.CommandContext(ctx, p.UVPath, "run", "python", "-c", pythonHarness)
 	}
 	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(payloadBytes)
