@@ -1,4 +1,5 @@
 # Binaries and build outputs
+/peek
 /sc
 bin/
 dist/
@@ -10,8 +11,12 @@ dist/
 *.test
 *.out
 
-# Sc temporary atomic swap files
+# Peek temporary atomic swap files
+.peek_tmp_*
 .sc_tmp_*
+
+# Local examples
+examples/
 
 # Python & virtual environment artifacts
 __pycache__/
