@@ -32,90 +32,57 @@ func formatOutputComment(out string) string {
 	if strings.HasPrefix(cleanOut, "#") {
 		return cleanOut
 	}
-	trimmed := strings.TrimSpace(cleanOut)
-	if strings.HasPrefix(trimmed, "➜") ||
-		strings.HasPrefix(trimmed, "❯") ||
-		strings.HasPrefix(trimmed, "✕") ||
-		strings.HasPrefix(trimmed, "…") ||
-		strings.HasPrefix(trimmed, "=>") {
-		return fmt.Sprintf("# %s", cleanOut)
-	}
-	return fmt.Sprintf("# => %s", cleanOut)
+	return fmt.Sprintf("# %s", cleanOut)
 }
 
-// splitCodeAndOutput separates code lines from any trailing output comments.
-func splitCodeAndOutput(lines []string) ([]string, []string) {
+// splitCodeAndOutput strips trailing output comments from block lines and returns the remaining code lines.
+func splitCodeAndOutput(lines []string) []string {
 	end := len(lines)
 	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
 		end--
 	}
-
-	start := end
-	for start > 0 && isOutputComment(lines[start-1]) {
-		start--
+	for end > 0 && isOutputComment(lines[end-1]) {
+		end--
 	}
-
-	var outLines []string
-	for _, l := range lines[start:end] {
-		outLines = append(outLines, strings.TrimRight(l, "\r\n"))
-	}
-	return lines[:start], outLines
-}
-
-// findCommentPos finds the unquoted '#' comment start index on a single line, or -1 if none.
-func findCommentPos(line string) int {
-	i := 0
-	n := len(line)
-	for i < n {
-		ch := line[i]
-		if ch == '#' {
-			return i
-		}
-		if i+3 <= n && (line[i:i+3] == `"""` || line[i:i+3] == `'''`) {
-			q := line[i : i+3]
-			i += 3
-			for i < n {
-				if strings.HasPrefix(line[i:], q) {
-					i += 3
-					break
-				}
-				i++
-			}
-			continue
-		}
-		if ch == '"' || ch == '\'' {
-			q := ch
-			i++
-			for i < n {
-				if line[i] == q {
-					backslashes := 0
-					for k := i - 1; k >= 0 && line[k] == '\\'; k-- {
-						backslashes++
-					}
-					if backslashes%2 == 0 {
-						i++
-						break
-					}
-				}
-				i++
-			}
-			continue
-		}
-		i++
-	}
-	return -1
+	return lines[:end]
 }
 
 // stripInlineOutputComment removes any trailing scratchpad output comment from a single code line.
 func stripInlineOutputComment(line string) (string, bool) {
-	pos := findCommentPos(line)
-	if pos == -1 {
-		return line, false
-	}
-	comment := line[pos:]
-	if isOutputComment(comment) {
-		cleanCode := strings.TrimRight(line[:pos], " \t")
-		return cleanCode, true
+	inQuote := byte(0)
+	for i := 0; i < len(line); i++ {
+		ch := line[i]
+		if inQuote != 0 {
+			if ch == inQuote {
+				backslashes := 0
+				for k := i - 1; k >= 0 && line[k] == '\\'; k-- {
+					backslashes++
+				}
+				if backslashes%2 == 0 {
+					inQuote = 0
+				}
+			}
+			continue
+		}
+		if ch == '"' || ch == '\'' {
+			if i+2 < len(line) && line[i+1] == ch && line[i+2] == ch {
+				q := line[i : i+3]
+				i += 3
+				for i < len(line) {
+					if strings.HasPrefix(line[i:], q) {
+						i += 2
+						break
+					}
+					i++
+				}
+				continue
+			}
+			inQuote = ch
+			continue
+		}
+		if ch == '#' && isOutputComment(line[i:]) {
+			return strings.TrimRight(line[:i], " \t"), true
+		}
 	}
 	return line, false
 }
@@ -157,51 +124,28 @@ func ApplyBlockOutputs(content string, blockResults []runner.BlockResult) (strin
 		cleanStartLine, _ := stripInlineOutputComment(lines[startIdx])
 		lines[startIdx] = cleanStartLine
 
-		blockLines := lines[startIdx:endIdx]
-		codeLines, _ := splitCodeAndOutput(blockLines)
+		codeLines := splitCodeAndOutput(lines[startIdx:endIdx])
 
 		// Check if output can be placed inline:
 		// 1. Exactly 1 output line
 		// 2. Output is an evaluated expression (starts with ➜), not a print log (❯) or error (✕)
 		// 3. Statement is single-line (len(codeLines) == 1)
 		// 4. Combined length fits within 100 characters
-		isInline := false
-		if len(b.Outputs) == 1 && len(codeLines) == 1 {
-			outStr := b.Outputs[0]
-			trimmedOut := strings.TrimSpace(outStr)
-			if strings.HasPrefix(trimmedOut, "➜") {
-				formatted := formatOutputComment(outStr)
-				if len(lines[startIdx])+2+len(formatted) <= 100 {
-					isInline = true
-				}
-			}
-		}
+		isInline := len(b.Outputs) == 1 && len(codeLines) == 1 &&
+			strings.HasPrefix(strings.TrimSpace(b.Outputs[0]), "➜") &&
+			len(lines[startIdx])+2+len(formatOutputComment(b.Outputs[0])) <= 100
 
+		var newBlock []string
 		if isInline {
-			formatted := formatOutputComment(b.Outputs[0])
-			lines[startIdx] = fmt.Sprintf("%s  %s", lines[startIdx], formatted)
-
-			var newLines []string
-			newLines = append(newLines, lines[:startIdx+1]...)
-			newLines = append(newLines, lines[endIdx:]...)
-			lines = newLines
+			newBlock = []string{fmt.Sprintf("%s  %s", lines[startIdx], formatOutputComment(b.Outputs[0]))}
 		} else {
-			var formattedOutputs []string
-			for _, out := range b.Outputs {
-				formattedOutputs = append(formattedOutputs, formatOutputComment(out))
-			}
-
-			var newBlock []string
 			newBlock = append(newBlock, codeLines...)
-			newBlock = append(newBlock, formattedOutputs...)
-
-			var newLines []string
-			newLines = append(newLines, lines[:startIdx]...)
-			newLines = append(newLines, newBlock...)
-			newLines = append(newLines, lines[endIdx:]...)
-
-			lines = newLines
+			for _, out := range b.Outputs {
+				newBlock = append(newBlock, formatOutputComment(out))
+			}
 		}
+
+		lines = append(lines[:startIdx], append(newBlock, lines[endIdx:]...)...)
 	}
 
 	return strings.Join(lines, eol), nil

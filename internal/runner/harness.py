@@ -40,8 +40,7 @@ def _extract_symbols(node):
     # 1. Imports
     if isinstance(node, ast.Import):
         for alias in node.names:
-            name = alias.asname or alias.name.split(".")[0]
-            defines.add(name)
+            defines.add(alias.asname or alias.name.split(".")[0])
         return defines, reads, is_side_effect
 
     if isinstance(node, ast.ImportFrom):
@@ -59,14 +58,14 @@ def _extract_symbols(node):
             for sub in ast.walk(deco):
                 if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
                     reads.add(sub.id)
-        local_names = set()
-        args = node.args
-        for arg in args.posonlyargs + args.args + args.kwonlyargs:
-            local_names.add(arg.arg)
-        if args.vararg:
-            local_names.add(args.vararg.arg)
-        if args.kwarg:
-            local_names.add(args.kwarg.arg)
+        local_names = {
+            arg.arg
+            for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs
+        }
+        if node.args.vararg:
+            local_names.add(node.args.vararg.arg)
+        if node.args.kwarg:
+            local_names.add(node.args.kwarg.arg)
 
         explicit_globals = set()
         for sub in ast.walk(node):
@@ -85,53 +84,12 @@ def _extract_symbols(node):
     # 3. Class definitions
     if isinstance(node, ast.ClassDef):
         defines.add(node.name)
-        for base in node.bases:
-            for sub in ast.walk(base):
-                if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
-                    reads.add(sub.id)
-        for deco in node.decorator_list:
-            for sub in ast.walk(deco):
-                if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
-                    reads.add(sub.id)
         for sub in ast.walk(node):
             if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
                 reads.add(sub.id)
         return defines, reads, is_side_effect
 
-    # 4. Assignments
-    if isinstance(node, ast.Assign):
-        for target in node.targets:
-            for sub in ast.walk(target):
-                if isinstance(sub, ast.Name):
-                    defines.add(sub.id)
-                    if isinstance(sub.ctx, ast.Load):
-                        reads.add(sub.id)
-        for sub in ast.walk(node.value):
-            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
-                reads.add(sub.id)
-        return defines, reads, is_side_effect
-
-    if isinstance(node, ast.AnnAssign):
-        for sub in ast.walk(node.target):
-            if isinstance(sub, ast.Name):
-                defines.add(sub.id)
-        if node.value:
-            for sub in ast.walk(node.value):
-                if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
-                    reads.add(sub.id)
-        return defines, reads, is_side_effect
-
-    if isinstance(node, ast.AugAssign):
-        for sub in ast.walk(node.target):
-            if isinstance(sub, ast.Name):
-                defines.add(sub.id)
-                reads.add(sub.id)
-        for sub in ast.walk(node.value):
-            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
-                reads.add(sub.id)
-        return defines, reads, is_side_effect
-
-    # 5. Method calls on objects (e.g. items.append(x) mutates items)
+    # 4. Method calls on objects (e.g. items.append(x) mutates items)
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
         call = node.value
         if isinstance(call.func, ast.Attribute):
@@ -142,15 +100,17 @@ def _extract_symbols(node):
                 defines.add(curr.id)
                 reads.add(curr.id)
 
-    # 6. General fallback for expressions and other statements
+    # 5. Augmented assignments (e.g. x += 1 loads target)
+    if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+        reads.add(node.target.id)
+
+    # 6. General fallback for all assignments, expressions, and statements
     for sub in ast.walk(node):
         if isinstance(sub, ast.Name):
             if isinstance(sub.ctx, ast.Store):
                 defines.add(sub.id)
             elif isinstance(sub.ctx, ast.Load):
                 reads.add(sub.id)
-        elif isinstance(sub, ast.Attribute) and sub.attr in ("path", "environ"):
-            is_side_effect = True
 
     return defines, reads, is_side_effect
 
@@ -245,13 +205,20 @@ def run():
         "__builtins__": __builtins__,
     }
 
-    def compile_stmt(node):
-        if isinstance(node, ast.Expr):
-            eval_mod = ast.Expression(body=node.value)
-            return None, compile(eval_mod, filename=file_path, mode="eval")
-        else:
-            exec_mod = ast.Module(body=[node], type_ignores=[])
-            return compile(exec_mod, filename=file_path, mode="exec"), None
+    def execute_node(node):
+        is_expr = isinstance(node, ast.Expr)
+        code = compile(
+            ast.Expression(body=node.value) if is_expr else ast.Module(body=[node], type_ignores=[]),
+            filename=file_path,
+            mode="eval" if is_expr else "exec",
+        )
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            try:
+                val = eval(code, scope) if is_expr else exec(code, scope)
+                return buf.getvalue(), val, None
+            except Exception:
+                return buf.getvalue(), None, sys.exc_info()
 
     target_idx = None
     if target_line is not None:
@@ -282,92 +249,42 @@ def run():
         if stmt["index"] not in needed_indices:
             continue
 
-        exec_code, eval_code = compile_stmt(stmt["node"])
+        captured_io, val, exc_info = execute_node(stmt["node"])
 
         # Silent upstream execution
         if target_idx is not None and stmt["index"] < target_idx:
-            dummy_io = io.StringIO()
-            with (
-                contextlib.redirect_stdout(dummy_io),
-                contextlib.redirect_stderr(dummy_io),
-            ):
-                try:
-                    if exec_code:
-                        exec(exec_code, scope)
-                    if eval_code:
-                        eval(eval_code, scope)
-                except Exception:
-                    exc_type, exc_val, _ = sys.exc_info()
-                    err_line = traceback.format_exception_only(
-                        exc_type, exc_val
-                    )[-1].strip()
-                    print(
-                        json.dumps({
-                            "error": (
-                                f"Upstream statement at line {stmt['start_line']}"
-                                f" error: {err_line}"
-                            ),
-                            "blocks": [],
-                        })
-                    )
-                    return
+            if exc_info:
+                err_line = traceback.format_exception_only(exc_info[0], exc_info[1])[-1].strip()
+                print(
+                    json.dumps({
+                        "error": f"Upstream statement at line {stmt['start_line']} error: {err_line}",
+                        "blocks": [],
+                    })
+                )
+                return
             continue
 
-        # Target statement (or sequential execution when target_idx is None)
-        stdout_buf = io.StringIO()
-        stderr_buf = io.StringIO()
-        result_repr = None
+        result_repr = repr(val) if val is not None else None
         error_lines = []
+        if exc_info:
+            tb = traceback.format_exception(*exc_info)
+            filtered = [
+                l for l in tb if not ("harness.py" in l or ("<string>" in l and "exec(" in l))
+            ]
+            error_lines = "".join(filtered).strip().splitlines()
 
-        with (
-            contextlib.redirect_stdout(stdout_buf),
-            contextlib.redirect_stderr(stderr_buf),
-        ):
-            try:
-                if exec_code:
-                    exec(exec_code, scope)
-                if eval_code:
-                    val = eval(eval_code, scope)
-                    if val is not None:
-                        result_repr = repr(val)
-            except Exception:
-                exc_type, exc_val, exc_tb = sys.exc_info()
-                tb = traceback.format_exception(exc_type, exc_val, exc_tb)
-                filtered = [
-                    l for l in tb if not ("<string>" in l and "exec(" in l)
-                ]
-                error_lines = "".join(filtered).strip().splitlines()
-
-        captured_out = stdout_buf.getvalue()
-        captured_err = stderr_buf.getvalue()
-        all_std = []
-        if captured_out:
-            all_std.extend(captured_out.splitlines())
-        if captured_err:
-            all_std.extend(captured_err.splitlines())
-
+        all_std = captured_io.splitlines() if captured_io else []
         outputs = _format_outputs(all_std, result_repr, error_lines, max_lines)
 
-        has_existing_outputs = False
-        if stmt["end_line"] > stmt["node"].end_lineno:
-            has_existing_outputs = True
-
-        if target_idx is not None:
+        has_existing_outputs = stmt["end_line"] > stmt["node"].end_lineno
+        if target_idx is not None or outputs or has_existing_outputs:
             results.append({
-                "index": stmt["index"],
                 "start_line": stmt["start_line"],
                 "end_line": stmt["end_line"],
                 "outputs": outputs,
             })
-            break
-        else:
-            if outputs or has_existing_outputs:
-                results.append({
-                    "index": stmt["index"],
-                    "start_line": stmt["start_line"],
-                    "end_line": stmt["end_line"],
-                    "outputs": outputs,
-                })
+            if target_idx is not None:
+                break
 
         if error_lines:
             break

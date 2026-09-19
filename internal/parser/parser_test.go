@@ -19,19 +19,16 @@ y * 2`
 
 	results := []runner.BlockResult{
 		{
-			Index:     0,
 			StartLine: 2,
 			EndLine:   2,
 			Outputs:   []string{"➜ 15"},
 		},
 		{
-			Index:     1,
 			StartLine: 4,
 			EndLine:   5,
 			Outputs:   []string{"❯ hello", "❯ world"},
 		},
 		{
-			Index:     2,
 			StartLine: 6,
 			EndLine:   6,
 			Outputs:   []string{"➜ 40"},
@@ -61,7 +58,6 @@ y * 2  # ➜ 40`
 	// Now test re-running block 2 with an updated output
 	results2 := []runner.BlockResult{
 		{
-			Index:     2,
 			StartLine: 8,
 			EndLine:   8,
 			Outputs:   []string{"➜ 999"},
@@ -123,7 +119,6 @@ func TestCRLFHandling(t *testing.T) {
 
 	results := []runner.BlockResult{
 		{
-			Index:     0,
 			StartLine: 1,
 			EndLine:   1,
 			Outputs:   []string{"➜ 42"},

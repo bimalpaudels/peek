@@ -6,11 +6,9 @@ import (
 
 // BlockResult represents the execution output and location of a single block.
 type BlockResult struct {
-	Index     int      `json:"index"`
 	StartLine int      `json:"start_line"` // 1-indexed, inclusive
 	EndLine   int      `json:"end_line"`   // 1-indexed, inclusive
 	Outputs   []string `json:"outputs"`
-	Error     string   `json:"error,omitempty"`
 }
 
 // SyntaxErrorDetails captures file-level syntax errors.
