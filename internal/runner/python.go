@@ -47,18 +47,27 @@ func NewPythonRunner() (*PythonRunner, error) {
 const pythonHarness = `
 import ast, contextlib, io, json, sys, traceback
 
+def _is_output_line(line):
+    s = line.strip()
+    if not s.startswith("#"):
+        return False
+    rest = s[1:].strip()
+    return any(rest.startswith(p) for p in ("=>", "➜", "❯", "✕", "…"))
+
 def _format_outputs(std_lines, result_repr, error_lines, max_lines):
-    raw = list(std_lines)
+    raw = []
+    for l in std_lines:
+        raw.append(f"❯ {l}")
     if result_repr is not None:
         lines = result_repr.splitlines()
         if lines:
-            raw.append(f"Out: {lines[0]}")
+            raw.append(f"➜ {lines[0]}")
             for extra in lines[1:]:
-                raw.append(f"     {extra}")
+                raw.append(f"  {extra}")
     for el in error_lines:
-        raw.append(f"Error: {el}")
+        raw.append(f"✕ {el}")
     if len(raw) > max_lines:
-        raw = raw[:max_lines] + [f"... [truncated: {len(raw)-max_lines} lines hidden]"]
+        raw = raw[:max_lines] + [f"… [truncated: {len(raw)-max_lines} lines hidden]"]
     return raw
 
 def run():
@@ -100,8 +109,7 @@ def run():
     for idx, node in enumerate(tree.body):
         start_ln = node.lineno
         end_ln = node.end_lineno
-        # Include any existing '# =>' comments directly following this statement
-        while end_ln < len(source_lines) and source_lines[end_ln].strip().startswith("# =>"):
+        while end_ln < len(source_lines) and _is_output_line(source_lines[end_ln]):
             end_ln += 1
 
         statements.append({

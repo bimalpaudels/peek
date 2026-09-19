@@ -2,6 +2,7 @@
 x = [1, 2, 3, 4]
 y = [i * 10 for i in x]
 y
+# ➜ [10, 20, 30, 40]
 
 # Persistence: using variables from previous block
 print(f"Sum of y is: {sum(y)}")

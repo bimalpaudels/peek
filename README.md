@@ -107,7 +107,7 @@ def two_sum(nums, target):
         seen[n] = i
 
 two_sum([2, 7, 11, 15], 9)
-# => Out: [0, 1]
+# ➜ [0, 1]
 ```
 
 When you're finished and want to paste into LeetCode:
@@ -115,4 +115,4 @@ When you're finished and want to paste into LeetCode:
 ```bash
 sc solution.py --clean
 ```
-All `# =>` comments vanish instantly.
+All output comments vanish instantly.

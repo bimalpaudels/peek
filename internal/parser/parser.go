@@ -184,7 +184,7 @@ func isCompoundContinuation(line string) bool {
 func nextNonBlankLine(lines []string, start int) (string, bool) {
 	for i := start; i < len(lines); i++ {
 		trimmed := strings.TrimSpace(lines[i])
-		if trimmed != "" && !strings.HasPrefix(trimmed, outputMarkerPrefix) {
+		if trimmed != "" && !isOutputComment(trimmed) {
 			return lines[i], true
 		}
 	}
@@ -278,6 +278,39 @@ func scanPythonLine(line string, inQuote string, bracketDepth int) (string, int)
 	return inQuote, bracketDepth
 }
 
+func isOutputComment(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if !strings.HasPrefix(trimmed, "#") {
+		return false
+	}
+	rest := strings.TrimSpace(trimmed[1:])
+	return strings.HasPrefix(rest, "=>") ||
+		strings.HasPrefix(rest, "➜") ||
+		strings.HasPrefix(rest, "❯") ||
+		strings.HasPrefix(rest, "✕") ||
+		strings.HasPrefix(rest, "…") ||
+		strings.HasPrefix(rest, "Out:") ||
+		strings.HasPrefix(rest, "Error:")
+}
+
+func formatOutputComment(out string) string {
+	cleanOut := strings.TrimRight(out, "\r\n")
+	if strings.HasPrefix(cleanOut, "#") {
+		return cleanOut
+	}
+	trimmed := strings.TrimSpace(cleanOut)
+	if strings.HasPrefix(trimmed, "➜") ||
+		strings.HasPrefix(trimmed, "❯") ||
+		strings.HasPrefix(trimmed, "✕") ||
+		strings.HasPrefix(trimmed, "…") {
+		return fmt.Sprintf("# %s", cleanOut)
+	}
+	if strings.HasPrefix(trimmed, "=>") {
+		return fmt.Sprintf("# %s", cleanOut)
+	}
+	return fmt.Sprintf("# => %s", cleanOut)
+}
+
 func splitCodeAndOutput(lines []string) ([]string, []string) {
 	end := len(lines)
 	for end > 0 && strings.TrimSpace(lines[end-1]) == "" {
@@ -285,7 +318,7 @@ func splitCodeAndOutput(lines []string) ([]string, []string) {
 	}
 
 	start := end
-	for start > 0 && strings.HasPrefix(strings.TrimSpace(lines[start-1]), outputMarkerPrefix) {
+	for start > 0 && isOutputComment(lines[start-1]) {
 		start--
 	}
 
@@ -355,12 +388,7 @@ func ApplyBlockOutputs(content string, blockResults []runner.BlockResult) (strin
 
 		var formattedOutputs []string
 		for _, out := range b.Outputs {
-			cleanOut := strings.TrimRight(out, "\r\n")
-			if !strings.HasPrefix(cleanOut, outputMarkerPrefix) {
-				formattedOutputs = append(formattedOutputs, fmt.Sprintf("%s %s", outputMarkerPrefix, cleanOut))
-			} else {
-				formattedOutputs = append(formattedOutputs, cleanOut)
-			}
+			formattedOutputs = append(formattedOutputs, formatOutputComment(out))
 		}
 
 		var newBlock []string
@@ -403,12 +431,7 @@ func UpdateBlockOutput(content string, blockIndex int, newOutputs []string) (str
 
 	var formattedOutputs []string
 	for _, out := range newOutputs {
-		cleanOut := strings.TrimRight(out, "\r\n")
-		if !strings.HasPrefix(cleanOut, outputMarkerPrefix) {
-			formattedOutputs = append(formattedOutputs, fmt.Sprintf("%s %s", outputMarkerPrefix, cleanOut))
-		} else {
-			formattedOutputs = append(formattedOutputs, cleanOut)
-		}
+		formattedOutputs = append(formattedOutputs, formatOutputComment(out))
 	}
 
 	var allLines []string
@@ -429,7 +452,7 @@ func UpdateBlockOutput(content string, blockIndex int, newOutputs []string) (str
 	return strings.Join(allLines, eol), nil
 }
 
-// CleanOutputs removes all lines starting with '# =>'.
+// CleanOutputs removes all managed output comment lines.
 func CleanOutputs(content string) string {
 	eol := "\n"
 	if strings.Contains(content, "\r\n") {
@@ -439,7 +462,7 @@ func CleanOutputs(content string) string {
 	var kept []string
 	for _, l := range lines {
 		trimmed := strings.TrimRight(l, "\r")
-		if !strings.HasPrefix(strings.TrimSpace(trimmed), outputMarkerPrefix) {
+		if !isOutputComment(trimmed) {
 			kept = append(kept, trimmed)
 		}
 	}

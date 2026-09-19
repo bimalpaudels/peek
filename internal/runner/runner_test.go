@@ -31,13 +31,13 @@ x + y
 
 	found := false
 	for _, out := range res.Blocks[0].Outputs {
-		if strings.Contains(out, "Out: 30") {
+		if strings.Contains(out, "➜ 30") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected 'Out: 30', got %v", res.Blocks[0].Outputs)
+		t.Errorf("expected '➜ 30', got %v", res.Blocks[0].Outputs)
 	}
 }
 
@@ -68,13 +68,13 @@ y
 
 	found := false
 	for _, out := range res.Blocks[0].Outputs {
-		if strings.Contains(out, "Out: 84") {
+		if strings.Contains(out, "➜ 84") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected 'Out: 84', got %v", res.Blocks[0].Outputs)
+		t.Errorf("expected '➜ 84', got %v", res.Blocks[0].Outputs)
 	}
 }
 
@@ -110,13 +110,13 @@ calculate([1, 2, 3, 4])
 
 	found := false
 	for _, out := range res.Blocks[0].Outputs {
-		if strings.Contains(out, "Out: 10") {
+		if strings.Contains(out, "➜ 10") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected 'Out: 10', got %v", res.Blocks[0].Outputs)
+		t.Errorf("expected '➜ 10', got %v", res.Blocks[0].Outputs)
 	}
 }
 
@@ -152,7 +152,7 @@ total
 
 	// Block 1 output
 	b1Out := strings.Join(res.Blocks[1].Outputs, "\n")
-	if !strings.Contains(b1Out, "Out: 6") {
+	if !strings.Contains(b1Out, "➜ 6") {
 		t.Errorf("block 1 missing expected output, got: %s", b1Out)
 	}
 }
@@ -258,7 +258,7 @@ x + y
 
 	outA := strings.Join(resA.Blocks[0].Outputs, "\n")
 	outB := strings.Join(resB.Blocks[0].Outputs, "\n")
-	if outA != outB || !strings.Contains(outA, "Out: 30") {
+	if outA != outB || !strings.Contains(outA, "➜ 30") {
 		t.Errorf("expected matching outputs:\nA: %s\nB: %s", outA, outB)
 	}
 }
