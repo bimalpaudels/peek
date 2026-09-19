@@ -56,6 +56,14 @@ func TestParseArgs(t *testing.T) {
 			wantTimeout:  5,
 		},
 		{
+			name:         "path with colon or drive letter",
+			args:         []string{`C:\projects\app.py:42`},
+			wantFile:     `C:\projects\app.py`,
+			wantLine:     intPtr(42),
+			wantMaxLines: 30,
+			wantTimeout:  10,
+		},
+		{
 			name:    "empty args error",
 			args:    []string{},
 			wantErr: true,

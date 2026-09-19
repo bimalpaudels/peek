@@ -20,11 +20,8 @@ def _format_outputs(std_lines, result_repr, error_lines, max_lines):
     for l in std_lines:
         raw.append(f"❯ {l}")
     if result_repr is not None:
-        lines = result_repr.splitlines()
-        if lines:
-            raw.append(f"➜ {lines[0]}")
-            for extra in lines[1:]:
-                raw.append(f"  {extra}")
+        for l in result_repr.splitlines():
+            raw.append(f"➜ {l}")
     for el in error_lines:
         raw.append(f"✕ {el}")
     if len(raw) > max_lines:

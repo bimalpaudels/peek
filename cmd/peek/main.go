@@ -64,12 +64,13 @@ func parseArgs(args []string) (filePath string, lineNo *int, clean bool, maxLine
 	}
 
 	filePath = positional[0]
-	if parts := strings.Split(filePath, ":"); len(parts) == 2 {
-		if num, err := strconv.Atoi(parts[1]); err == nil {
-			filePath = parts[0]
+	if lastColon := strings.LastIndex(filePath, ":"); lastColon != -1 {
+		if num, err := strconv.Atoi(filePath[lastColon+1:]); err == nil {
+			filePath = filePath[:lastColon]
 			lineNo = &num
 		}
-	} else if len(positional) > 1 {
+	}
+	if lineNo == nil && len(positional) > 1 {
 		if num, err := strconv.Atoi(positional[1]); err == nil {
 			lineNo = &num
 		}
@@ -100,6 +101,9 @@ func main() {
 
 	if clean {
 		cleaned := parser.CleanOutputs(content)
+		if cleaned == content {
+			return
+		}
 		if err := parser.AtomicWrite(absPath, cleaned); err != nil {
 			fmt.Fprintf(os.Stderr, "peek error writing file: %v\n", err)
 			os.Exit(1)
@@ -141,6 +145,10 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "peek error updating output: %v\n", err)
 		os.Exit(1)
+	}
+
+	if updated == content {
+		return
 	}
 
 	if err := parser.AtomicWrite(absPath, updated); err != nil {
