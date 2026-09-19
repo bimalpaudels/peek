@@ -13,8 +13,10 @@ import (
 	"peek/internal/runner"
 )
 
+var Version = "0.1.0"
+
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `peek: universal fast in-file scratchpad
+	fmt.Fprintf(os.Stderr, `peek: universal fast in-file scratchpad (v%s)
 
 Usage:
   peek <file:line>             Evaluate statement/block at line number (e.g. peek main.py:15)
@@ -26,8 +28,9 @@ Options:
   --clean                      Remove all scratchpad output comments
   --max-lines int              Max output lines per statement (default 30)
   --timeout int                Execution timeout in seconds (default 10)
+  -v, --version                Show version information
   -h, --help                   Show this help message
-`)
+`, Version)
 }
 
 func parseArgs(args []string) (filePath string, lineNo *int, clean bool, maxLines int, timeout int, err error) {
@@ -36,21 +39,36 @@ func parseArgs(args []string) (filePath string, lineNo *int, clean bool, maxLine
 	var positional []string
 
 	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-h", "--help":
+		switch {
+		case args[i] == "-h" || args[i] == "--help":
 			printUsage()
 			os.Exit(0)
-		case "--clean":
+		case args[i] == "-v" || args[i] == "--version":
+			fmt.Printf("peek v%s\n", Version)
+			os.Exit(0)
+		case args[i] == "--clean":
 			clean = true
-		case "--max-lines":
+		case args[i] == "--max-lines":
 			if i+1 < len(args) {
 				i++
-				maxLines, _ = strconv.Atoi(args[i])
+				if val, convErr := strconv.Atoi(args[i]); convErr == nil && val > 0 {
+					maxLines = val
+				}
 			}
-		case "--timeout":
+		case strings.HasPrefix(args[i], "--max-lines="):
+			if val, convErr := strconv.Atoi(strings.TrimPrefix(args[i], "--max-lines=")); convErr == nil && val > 0 {
+				maxLines = val
+			}
+		case args[i] == "--timeout":
 			if i+1 < len(args) {
 				i++
-				timeout, _ = strconv.Atoi(args[i])
+				if val, convErr := strconv.Atoi(args[i]); convErr == nil && val > 0 {
+					timeout = val
+				}
+			}
+		case strings.HasPrefix(args[i], "--timeout="):
+			if val, convErr := strconv.Atoi(strings.TrimPrefix(args[i], "--timeout=")); convErr == nil && val > 0 {
+				timeout = val
 			}
 		default:
 			if !strings.HasPrefix(args[i], "--") {

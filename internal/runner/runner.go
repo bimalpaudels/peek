@@ -29,4 +29,3 @@ type ExecutionResult struct {
 type Runner interface {
 	Execute(ctx context.Context, filePath string, source string, targetLine *int, maxLines int) (*ExecutionResult, error)
 }
-

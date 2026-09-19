@@ -221,4 +221,3 @@ z = 30`
 		t.Errorf("expected stale comments wiped:\nGOT:\n%s\nWANT:\n%s", updated, expected)
 	}
 }
-

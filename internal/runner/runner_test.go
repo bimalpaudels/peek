@@ -200,4 +200,3 @@ func TestPythonRunner_CleanStaleInlineComment(t *testing.T) {
 		t.Errorf("expected 0 outputs for assignment, got %v", res.Blocks[0].Outputs)
 	}
 }
-

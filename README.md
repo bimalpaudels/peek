@@ -15,6 +15,17 @@ Under the hood, Python statement parsing, dependency slicing, and execution are 
 5. **Clean Codebase**: A single `peek file.py --clean` command strips all output comments (both inline and multi-line), leaving pristine production code ready for git or LeetCode.
 6. **Decoupled from IDEs**: Works directly in any terminal and easily integrates with VS Code, Neovim, or tmux keybindings.
 
+## Prerequisites
+
+- **Go 1.22+** (to compile the binary)
+- **uv** (for fast, stateless Python runtime execution):
+  ```bash
+  # Install uv (macOS / Linux)
+  curl -LsSf https://astral.sh/uv/install.sh | sh
+  # Or via Homebrew
+  brew install uv
+  ```
+
 ---
 
 ## Installation & Build

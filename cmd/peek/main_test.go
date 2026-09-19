@@ -56,6 +56,14 @@ func TestParseArgs(t *testing.T) {
 			wantTimeout:  5,
 		},
 		{
+			name:         "custom options with equals syntax",
+			args:         []string{"foo.py:10", "--max-lines=50", "--timeout=5"},
+			wantFile:     "foo.py",
+			wantLine:     intPtr(10),
+			wantMaxLines: 50,
+			wantTimeout:  5,
+		},
+		{
 			name:         "path with colon or drive letter",
 			args:         []string{`C:\projects\app.py:42`},
 			wantFile:     `C:\projects\app.py`,

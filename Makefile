@@ -5,8 +5,10 @@ CMD_DIR     := ./cmd/peek
 # Installation directory (defaults to ~/.local/bin, override via: make install INSTALL_DIR=/usr/local/bin)
 INSTALL_DIR ?= $(HOME)/.local/bin
 
-# Go build flags: strip DWARF and symbol table for minimal binary footprint
-LDFLAGS := -s -w
+VERSION     ?= 0.1.0
+
+# Go build flags: strip DWARF and symbol table for minimal binary footprint, inject version
+LDFLAGS := -s -w -X main.Version=$(VERSION)
 
 .PHONY: all build install uninstall remove update clean test help
 
