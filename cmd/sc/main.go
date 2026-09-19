@@ -26,6 +26,7 @@ Options:
   --clean                    Remove all '# =>' output comments
   --max-lines int            Max output lines per block (default 30)
   --timeout int              Execution timeout in seconds (default 10)
+  -h, --help                 Show this help message
 `)
 }
 
@@ -36,6 +37,9 @@ func parseArgs(args []string) (filePath string, lineNo *int, clean bool, maxLine
 
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "-h", "--help":
+			printUsage()
+			os.Exit(0)
 		case "--clean":
 			clean = true
 		case "--max-lines":
@@ -104,12 +108,6 @@ func main() {
 		return
 	}
 
-	blocks := parser.ParseBlocks(content)
-	if len(blocks) == 0 {
-		fmt.Fprintf(os.Stderr, "sc: no code blocks found in %s\n", filePath)
-		return
-	}
-
 	pyRunner, err := runner.NewPythonRunner()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "sc error: %v\n", err)
@@ -119,39 +117,33 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	var targetBlocks []parser.Block
-	if lineNo != nil {
-		target := parser.FindBlockByLine(blocks, *lineNo)
-		if target == nil {
-			fmt.Fprintf(os.Stderr, "sc error: could not locate block for line %d\n", *lineNo)
-			os.Exit(1)
-		}
-		targetBlocks = []parser.Block{*target}
-	} else {
-		targetBlocks = blocks
+	result, err := pyRunner.Execute(ctx, absPath, content, lineNo, maxLines)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sc runner error: %v\n", err)
+		os.Exit(1)
 	}
 
-	currentContent := content
-	for _, b := range targetBlocks {
-		var upstream []string
-		for i := 0; i < b.Index; i++ {
-			upstream = append(upstream, blocks[i].Code)
-		}
-
-		outputs, err := pyRunner.ExecuteBlocks(ctx, absPath, upstream, b.Code, maxLines)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "sc runner error in block %d: %v\n", b.Index, err)
-			os.Exit(1)
-		}
-
-		currentContent, err = parser.UpdateBlockOutput(currentContent, b.Index, outputs)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "sc error updating output: %v\n", err)
-			os.Exit(1)
-		}
+	if result.SyntaxError != nil {
+		fmt.Fprintf(os.Stderr, "sc: %s\n", result.SyntaxError.Msg)
+		os.Exit(1)
 	}
 
-	if err := parser.AtomicWrite(absPath, currentContent); err != nil {
+	if result.Error != "" {
+		fmt.Fprintf(os.Stderr, "sc error: %s\n", result.Error)
+		os.Exit(1)
+	}
+
+	if len(result.Blocks) == 0 {
+		return
+	}
+
+	updated, err := parser.ApplyBlockOutputs(content, result.Blocks)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "sc error updating output: %v\n", err)
+		os.Exit(1)
+	}
+
+	if err := parser.AtomicWrite(absPath, updated); err != nil {
 		fmt.Fprintf(os.Stderr, "sc error writing file: %v\n", err)
 		os.Exit(1)
 	}

@@ -5,7 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
+
+	"sc/internal/runner"
 )
 
 var (
@@ -89,6 +92,9 @@ func parseBlankLines(lines []string) []Block {
 	blockStartIdx := 0
 	var currentChunk []string
 
+	inQuote := ""
+	bracketDepth := 0
+
 	commit := func(start, end int, chunk []string) {
 		if len(chunk) == 0 {
 			return
@@ -114,18 +120,37 @@ func parseBlankLines(lines []string) []Block {
 
 	for i, l := range lines {
 		isBlank := strings.TrimSpace(l) == ""
+
 		if isBlank {
 			if inBlock {
-				commit(blockStartIdx, i, currentChunk)
-				currentChunk = nil
-				inBlock = false
+				isSplit := false
+				if inQuote == "" && bracketDepth == 0 {
+					next, found := nextNonBlankLine(lines, i+1)
+					if !found || (!isIndented(next) && !isCompoundContinuation(next)) {
+						isSplit = true
+					}
+				}
+
+				if isSplit {
+					commit(blockStartIdx, i, currentChunk)
+					currentChunk = nil
+					inBlock = false
+					inQuote = ""
+					bracketDepth = 0
+				} else {
+					// Blank line within an indented body, bracket, or multi-line string
+					currentChunk = append(currentChunk, l)
+				}
 			}
 		} else {
 			if !inBlock {
 				inBlock = true
 				blockStartIdx = i
+				inQuote = ""
+				bracketDepth = 0
 			}
 			currentChunk = append(currentChunk, l)
+			inQuote, bracketDepth = scanPythonLine(l, inQuote, bracketDepth)
 		}
 	}
 
@@ -134,6 +159,123 @@ func parseBlankLines(lines []string) []Block {
 	}
 
 	return blocks
+}
+
+func isIndented(line string) bool {
+	trimmed := strings.TrimRight(line, "\r\n")
+	if strings.TrimSpace(trimmed) == "" {
+		return false
+	}
+	return trimmed[0] == ' ' || trimmed[0] == '\t'
+}
+
+func isCompoundContinuation(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	if strings.HasPrefix(trimmed, "except") ||
+		strings.HasPrefix(trimmed, "finally") ||
+		strings.HasPrefix(trimmed, "else:") ||
+		strings.HasPrefix(trimmed, "elif ") ||
+		strings.HasPrefix(trimmed, "elif(") {
+		return true
+	}
+	return false
+}
+
+func nextNonBlankLine(lines []string, start int) (string, bool) {
+	for i := start; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		if trimmed != "" && !strings.HasPrefix(trimmed, outputMarkerPrefix) {
+			return lines[i], true
+		}
+	}
+	return "", false
+}
+
+func scanPythonLine(line string, inQuote string, bracketDepth int) (string, int) {
+	i := 0
+	n := len(line)
+
+	if inQuote != "" {
+		for i < n {
+			if strings.HasPrefix(line[i:], inQuote) {
+				backslashes := 0
+				for k := i - 1; k >= 0 && line[k] == '\\'; k-- {
+					backslashes++
+				}
+				if backslashes%2 == 0 {
+					qLen := len(inQuote)
+					inQuote = ""
+					i += qLen
+					break
+				}
+			}
+			i++
+		}
+	}
+
+	for i < n {
+		ch := line[i]
+
+		if ch == '#' {
+			break
+		}
+
+		if i+3 <= n && (line[i:i+3] == `"""` || line[i:i+3] == `'''`) {
+			q := line[i : i+3]
+			i += 3
+			closed := false
+			for i < n {
+				if strings.HasPrefix(line[i:], q) {
+					backslashes := 0
+					for k := i - 1; k >= 0 && line[k] == '\\'; k-- {
+						backslashes++
+					}
+					if backslashes%2 == 0 {
+						i += 3
+						closed = true
+						break
+					}
+				}
+				i++
+			}
+			if !closed {
+				inQuote = q
+				break
+			}
+			continue
+		}
+
+		if ch == '"' || ch == '\'' {
+			q := ch
+			i++
+			for i < n {
+				if line[i] == q {
+					backslashes := 0
+					for k := i - 1; k >= 0 && line[k] == '\\'; k-- {
+						backslashes++
+					}
+					if backslashes%2 == 0 {
+						i++
+						break
+					}
+				}
+				i++
+			}
+			continue
+		}
+
+		switch ch {
+		case '(', '[', '{':
+			bracketDepth++
+		case ')', ']', '}':
+			if bracketDepth > 0 {
+				bracketDepth--
+			}
+		}
+		i++
+	}
+
+	return inQuote, bracketDepth
 }
 
 func splitCodeAndOutput(lines []string) ([]string, []string) {
@@ -174,6 +316,66 @@ func FindBlockByLine(blocks []Block, lineNo int) *Block {
 		prev = &blocks[i]
 	}
 	return &blocks[len(blocks)-1]
+}
+
+// ApplyBlockOutputs splices the formatted outputs of the given blocks into content.
+// It processes blocks from bottom to top so line index modifications never invalidate preceding ranges.
+func ApplyBlockOutputs(content string, blockResults []runner.BlockResult) (string, error) {
+	if len(blockResults) == 0 {
+		return content, nil
+	}
+
+	eol := "\n"
+	if strings.Contains(content, "\r\n") {
+		eol = "\r\n"
+	}
+
+	lines := strings.Split(content, "\n")
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], "\r")
+	}
+
+	// Sort blocks descending by StartLine so line numbers of earlier blocks remain stable
+	sorted := make([]runner.BlockResult, len(blockResults))
+	copy(sorted, blockResults)
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].StartLine > sorted[j].StartLine
+	})
+
+	for _, b := range sorted {
+		if b.StartLine < 1 || b.EndLine > len(lines) || b.StartLine > b.EndLine {
+			continue
+		}
+
+		startIdx := b.StartLine - 1
+		endIdx := b.EndLine
+
+		blockLines := lines[startIdx:endIdx]
+		codeLines, _ := splitCodeAndOutput(blockLines)
+
+		var formattedOutputs []string
+		for _, out := range b.Outputs {
+			cleanOut := strings.TrimRight(out, "\r\n")
+			if !strings.HasPrefix(cleanOut, outputMarkerPrefix) {
+				formattedOutputs = append(formattedOutputs, fmt.Sprintf("%s %s", outputMarkerPrefix, cleanOut))
+			} else {
+				formattedOutputs = append(formattedOutputs, cleanOut)
+			}
+		}
+
+		var newBlock []string
+		newBlock = append(newBlock, codeLines...)
+		newBlock = append(newBlock, formattedOutputs...)
+
+		var newLines []string
+		newLines = append(newLines, lines[:startIdx]...)
+		newLines = append(newLines, newBlock...)
+		newLines = append(newLines, lines[endIdx:]...)
+
+		lines = newLines
+	}
+
+	return strings.Join(lines, eol), nil
 }
 
 // UpdateBlockOutput replaces the output comments of the given block.
