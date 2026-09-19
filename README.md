@@ -136,6 +136,5 @@ All scratchpad comments vanish instantly.
 ├── internal/
 │   ├── parser/         # Output comment detection, formatting, and atomic file I/O
 │   └── runner/         # Execution engine (uv dispatch, embedded harness.py)
-├── examples/           # Sample demo files
 └── Makefile            # Build, test, and install targets
 ```

@@ -259,7 +259,7 @@ def run():
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             try:
-                val = eval(code, scope) if is_expr else exec(code, scope)
+                val = eval(code, scope) if is_expr else exec(code, scope)  # noqa: S102
                 return buf.getvalue(), val, None
             except (Exception, SystemExit):  # noqa: BLE001
                 return buf.getvalue(), None, sys.exc_info()
