@@ -213,12 +213,6 @@ func AtomicWrite(filePath string, content string) error {
 		return err
 	}
 
-	// Flush to disk before renaming
-	if err := tmpFile.Sync(); err != nil {
-		_ = tmpFile.Close()
-		return err
-	}
-
 	if err := tmpFile.Close(); err != nil {
 		return err
 	}

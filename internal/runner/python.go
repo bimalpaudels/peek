@@ -76,7 +76,13 @@ func (p *PythonRunner) Execute(
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, p.UVPath, "run", "python", "-c", pythonHarness)
+	harnessPath := getHarnessPath()
+	var cmd *exec.Cmd
+	if harnessPath != "" {
+		cmd = exec.CommandContext(ctx, p.UVPath, "run", "--no-project", "python", harnessPath)
+	} else {
+		cmd = exec.CommandContext(ctx, p.UVPath, "run", "--no-project", "python", "-c", pythonHarness)
+	}
 	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(payloadBytes)
 
@@ -98,4 +104,26 @@ func (p *PythonRunner) Execute(
 	}
 
 	return &resp, nil
+}
+
+func getHarnessPath() string {
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		cacheDir = os.TempDir()
+	}
+	peekDir := filepath.Join(cacheDir, "peek")
+	if err := os.MkdirAll(peekDir, 0755); err != nil {
+		return ""
+	}
+	harnessFile := filepath.Join(peekDir, "harness.py")
+
+	// If file exists and matches embedded version, reuse it
+	if data, err := os.ReadFile(harnessFile); err == nil && string(data) == pythonHarness {
+		return harnessFile
+	}
+
+	if err := os.WriteFile(harnessFile, []byte(pythonHarness), 0644); err == nil {
+		return harnessFile
+	}
+	return ""
 }
