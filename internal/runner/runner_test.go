@@ -285,3 +285,54 @@ calculate(6, 7)
 	}
 }
 
+func TestPythonRunner_BlankLineNoOp(t *testing.T) {
+	r, err := NewPythonRunner()
+	if err != nil {
+		t.Skipf("skipping python runner test: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	source := `x = 10
+
+# A comment followed by blank lines
+
+y = 20
+`
+	// Line 3 is a comment, Line 4 is blank
+	targetLine := 4
+	res, err := r.Execute(ctx, "test.py", source, &targetLine, 30)
+	checkRunnerErr(t, err)
+
+	if len(res.Blocks) != 0 {
+		t.Fatalf("expected 0 blocks for blank line, got %d", len(res.Blocks))
+	}
+}
+
+func TestPythonRunner_FunctionDefNoOp(t *testing.T) {
+	r, err := NewPythonRunner()
+	if err != nil {
+		t.Skipf("skipping python runner test: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	source := `def calculate(a, b):
+    diff = a - b
+    return diff
+
+calculate(10, 5)
+`
+	// Line 2 is inside the function body
+	targetLine := 2
+	res, err := r.Execute(ctx, "test.py", source, &targetLine, 30)
+	checkRunnerErr(t, err)
+
+	if len(res.Blocks) != 0 {
+		t.Fatalf("expected 0 blocks for function definition line, got %d", len(res.Blocks))
+	}
+}
+
+

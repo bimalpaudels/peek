@@ -255,14 +255,21 @@ def run():
 
     target_idx = None
     if target_line is not None:
-        target_idx = len(statements) - 1
         for idx, stmt in enumerate(statements):
             if stmt["start_line"] <= target_line <= stmt["end_line"]:
                 target_idx = idx
                 break
-            if stmt["start_line"] > target_line:
-                target_idx = max(0, idx - 1)
-                break
+
+        # If target_line lands on a blank line or comment: strict no-op
+        if target_idx is None:
+            print(json.dumps({"blocks": []}))
+            return
+
+        # If target statement is an inert declaration (FunctionDef, AsyncFunctionDef, ClassDef): strict no-op
+        target_node = statements[target_idx]["node"]
+        if isinstance(target_node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            print(json.dumps({"blocks": []}))
+            return
 
     # If target_line is specified, apply program slicing
     needed_indices = set(range(len(statements)))
