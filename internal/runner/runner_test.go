@@ -217,3 +217,48 @@ y = 2
 		t.Errorf("expected traceback to reference line 5, got: %s", combined)
 	}
 }
+
+func TestPythonRunner_FormatterProof(t *testing.T) {
+	r, err := NewPythonRunner()
+	if err != nil {
+		t.Skipf("skipping python runner test: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Version A: No blank lines at all
+	sourceA := `x = 10
+y = 20
+x + y`
+
+	// Version B: Multiple arbitrary blank lines everywhere
+	sourceB := `
+
+x = 10
+
+
+y = 20
+
+x + y
+
+`
+	resA, err := r.Execute(ctx, "test.py", sourceA, nil, 30)
+	if err != nil {
+		t.Fatalf("version A error: %v", err)
+	}
+	resB, err := r.Execute(ctx, "test.py", sourceB, nil, 30)
+	if err != nil {
+		t.Fatalf("version B error: %v", err)
+	}
+
+	if len(resA.Blocks) != 1 || len(resB.Blocks) != 1 {
+		t.Fatalf("expected 1 output statement each, got A=%d, B=%d", len(resA.Blocks), len(resB.Blocks))
+	}
+
+	outA := strings.Join(resA.Blocks[0].Outputs, "\n")
+	outB := strings.Join(resB.Blocks[0].Outputs, "\n")
+	if outA != outB || !strings.Contains(outA, "Out: 30") {
+		t.Errorf("expected matching outputs:\nA: %s\nB: %s", outA, outB)
+	}
+}

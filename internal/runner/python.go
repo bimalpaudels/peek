@@ -42,8 +42,8 @@ func NewPythonRunner() (*PythonRunner, error) {
 	return &PythonRunner{UVPath: uvPath}, nil
 }
 
-// Inline Python harness that parses files via Python's native AST,
-// groups statements into blocks based on blank lines, and executes blocks in a single session.
+// Inline Python harness that parses files via Python's native AST
+// and executes at the statement level without any blank-line heuristics.
 const pythonHarness = `
 import ast, contextlib, io, json, sys, traceback
 
@@ -95,46 +95,20 @@ def run():
 
     source_lines = source.splitlines()
 
-    # Group top-level AST statements into blocks separated by blank lines
-    blocks = []
-    current_nodes = [tree.body[0]]
-    block_start_line = tree.body[0].lineno
-
-    for i in range(1, len(tree.body)):
-        prev_node = tree.body[i - 1]
-        curr_node = tree.body[i]
-
-        # Lines between prev_node end and curr_node start (0-indexed slice)
-        gap_lines = source_lines[prev_node.end_lineno : curr_node.lineno - 1]
-        has_blank_line = any(not l.strip() or l.strip().startswith("# =>") for l in gap_lines)
-
-        if has_blank_line:
-            last_n = current_nodes[-1]
-            end_ln = last_n.end_lineno
-            while end_ln < len(source_lines) and source_lines[end_ln].strip().startswith("# =>"):
-                end_ln += 1
-
-            blocks.append({
-                "index": len(blocks),
-                "start_line": block_start_line,
-                "end_line": end_ln,
-                "nodes": current_nodes,
-            })
-            current_nodes = [curr_node]
-            block_start_line = curr_node.lineno
-        else:
-            current_nodes.append(curr_node)
-
-    if current_nodes:
-        last_n = current_nodes[-1]
-        end_ln = last_n.end_lineno
+    # Extract all top-level statements from AST
+    statements = []
+    for idx, node in enumerate(tree.body):
+        start_ln = node.lineno
+        end_ln = node.end_lineno
+        # Include any existing '# =>' comments directly following this statement
         while end_ln < len(source_lines) and source_lines[end_ln].strip().startswith("# =>"):
             end_ln += 1
-        blocks.append({
-            "index": len(blocks),
-            "start_line": block_start_line,
+
+        statements.append({
+            "index": idx,
+            "start_line": start_ln,
             "end_line": end_ln,
-            "nodes": current_nodes,
+            "node": node,
         })
 
     scope = {
@@ -144,40 +118,32 @@ def run():
         "__builtins__": __builtins__,
     }
 
-    def compile_block(nodes):
-        exec_nodes = list(nodes)
-        last_expr = None
-        if isinstance(exec_nodes[-1], ast.Expr):
-            last_expr = exec_nodes.pop()
-
-        exec_code = None
-        eval_code = None
-        if exec_nodes:
-            mod = ast.Module(body=exec_nodes, type_ignores=[])
-            exec_code = compile(mod, filename=file_path, mode="exec")
-        if last_expr is not None:
-            expr_mod = ast.Expression(body=last_expr.value)
-            eval_code = compile(expr_mod, filename=file_path, mode="eval")
-        return exec_code, eval_code
+    def compile_stmt(node):
+        if isinstance(node, ast.Expr):
+            eval_mod = ast.Expression(body=node.value)
+            return None, compile(eval_mod, filename=file_path, mode="eval")
+        else:
+            exec_mod = ast.Module(body=[node], type_ignores=[])
+            return compile(exec_mod, filename=file_path, mode="exec"), None
 
     target_idx = None
     if target_line is not None:
-        target_idx = len(blocks) - 1
-        for idx, b in enumerate(blocks):
-            if b["start_line"] <= target_line <= b["end_line"]:
+        target_idx = len(statements) - 1
+        for idx, stmt in enumerate(statements):
+            if stmt["start_line"] <= target_line <= stmt["end_line"]:
                 target_idx = idx
                 break
-            if b["start_line"] > target_line:
+            if stmt["start_line"] > target_line:
                 target_idx = max(0, idx - 1)
                 break
 
     results = []
 
-    for b in blocks:
-        exec_code, eval_code = compile_block(b["nodes"])
+    for stmt in statements:
+        exec_code, eval_code = compile_stmt(stmt["node"])
 
         # Silent upstream execution
-        if target_idx is not None and b["index"] < target_idx:
+        if target_idx is not None and stmt["index"] < target_idx:
             dummy_io = io.StringIO()
             with contextlib.redirect_stdout(dummy_io), contextlib.redirect_stderr(dummy_io):
                 try:
@@ -189,7 +155,7 @@ def run():
                     exc_type, exc_val, _ = sys.exc_info()
                     err_line = traceback.format_exception_only(exc_type, exc_val)[-1].strip()
                     print(json.dumps({
-                        "error": f"Upstream block {b['index']} error: {err_line}",
+                        "error": f"Upstream statement at line {stmt['start_line']} error: {err_line}",
                         "blocks": []
                     }))
                     return
@@ -223,15 +189,27 @@ def run():
             all_std.extend(captured_err.splitlines())
 
         outputs = _format_outputs(all_std, result_repr, error_lines, max_lines)
-        results.append({
-            "index": b["index"],
-            "start_line": b["start_line"],
-            "end_line": b["end_line"],
-            "outputs": outputs,
-        })
 
-        if target_idx is not None and b["index"] == target_idx:
+        has_existing_outputs = False
+        if stmt["end_line"] > stmt["node"].end_lineno:
+            has_existing_outputs = True
+
+        if target_idx is not None:
+            results.append({
+                "index": stmt["index"],
+                "start_line": stmt["start_line"],
+                "end_line": stmt["end_line"],
+                "outputs": outputs,
+            })
             break
+        else:
+            if outputs or has_existing_outputs:
+                results.append({
+                    "index": stmt["index"],
+                    "start_line": stmt["start_line"],
+                    "end_line": stmt["end_line"],
+                    "outputs": outputs,
+                })
 
         if error_lines:
             break
