@@ -351,8 +351,65 @@ func FindBlockByLine(blocks []Block, lineNo int) *Block {
 	return &blocks[len(blocks)-1]
 }
 
+func findCommentPos(line string) int {
+	i := 0
+	n := len(line)
+	for i < n {
+		ch := line[i]
+		if ch == '#' {
+			return i
+		}
+		if i+3 <= n && (line[i:i+3] == `"""` || line[i:i+3] == `'''`) {
+			q := line[i : i+3]
+			i += 3
+			for i < n {
+				if strings.HasPrefix(line[i:], q) {
+					i += 3
+					break
+				}
+				i++
+			}
+			continue
+		}
+		if ch == '"' || ch == '\'' {
+			q := ch
+			i++
+			for i < n {
+				if line[i] == q {
+					backslashes := 0
+					for k := i - 1; k >= 0 && line[k] == '\\'; k-- {
+						backslashes++
+					}
+					if backslashes%2 == 0 {
+						i++
+						break
+					}
+				}
+				i++
+			}
+			continue
+		}
+		i++
+	}
+	return -1
+}
+
+func stripInlineOutputComment(line string) (string, bool) {
+	pos := findCommentPos(line)
+	if pos == -1 {
+		return line, false
+	}
+	comment := line[pos:]
+	if isOutputComment(comment) {
+		cleanCode := strings.TrimRight(line[:pos], " \t")
+		return cleanCode, true
+	}
+	return line, false
+}
+
 // ApplyBlockOutputs splices the formatted outputs of the given blocks into content.
-// It processes blocks from bottom to top so line index modifications never invalidate preceding ranges.
+// Short single-line expression outputs are attached inline (e.g. `x  # ➜ 10`),
+// while multi-line, long, or printed (stdout) outputs are placed below.
 func ApplyBlockOutputs(content string, blockResults []runner.BlockResult) (string, error) {
 	if len(blockResults) == 0 {
 		return content, nil
@@ -383,24 +440,55 @@ func ApplyBlockOutputs(content string, blockResults []runner.BlockResult) (strin
 		startIdx := b.StartLine - 1
 		endIdx := b.EndLine
 
+		// Clean any previous inline output comment on start line
+		cleanStartLine, _ := stripInlineOutputComment(lines[startIdx])
+		lines[startIdx] = cleanStartLine
+
 		blockLines := lines[startIdx:endIdx]
 		codeLines, _ := splitCodeAndOutput(blockLines)
 
-		var formattedOutputs []string
-		for _, out := range b.Outputs {
-			formattedOutputs = append(formattedOutputs, formatOutputComment(out))
+		// Check if output can be placed inline:
+		// 1. Exactly 1 output line
+		// 2. Output is an evaluated expression (starts with ➜), not a print log (❯) or error (✕)
+		// 3. Statement is single-line (len(codeLines) == 1)
+		// 4. Combined length fits within 100 characters
+		isInline := false
+		if len(b.Outputs) == 1 && len(codeLines) == 1 {
+			outStr := b.Outputs[0]
+			trimmedOut := strings.TrimSpace(outStr)
+			if strings.HasPrefix(trimmedOut, "➜") {
+				formatted := formatOutputComment(outStr)
+				if len(lines[startIdx])+2+len(formatted) <= 100 {
+					isInline = true
+				}
+			}
 		}
 
-		var newBlock []string
-		newBlock = append(newBlock, codeLines...)
-		newBlock = append(newBlock, formattedOutputs...)
+		if isInline {
+			formatted := formatOutputComment(b.Outputs[0])
+			lines[startIdx] = fmt.Sprintf("%s  %s", lines[startIdx], formatted)
 
-		var newLines []string
-		newLines = append(newLines, lines[:startIdx]...)
-		newLines = append(newLines, newBlock...)
-		newLines = append(newLines, lines[endIdx:]...)
+			var newLines []string
+			newLines = append(newLines, lines[:startIdx+1]...)
+			newLines = append(newLines, lines[endIdx:]...)
+			lines = newLines
+		} else {
+			var formattedOutputs []string
+			for _, out := range b.Outputs {
+				formattedOutputs = append(formattedOutputs, formatOutputComment(out))
+			}
 
-		lines = newLines
+			var newBlock []string
+			newBlock = append(newBlock, codeLines...)
+			newBlock = append(newBlock, formattedOutputs...)
+
+			var newLines []string
+			newLines = append(newLines, lines[:startIdx]...)
+			newLines = append(newLines, newBlock...)
+			newLines = append(newLines, lines[endIdx:]...)
+
+			lines = newLines
+		}
 	}
 
 	return strings.Join(lines, eol), nil
@@ -452,7 +540,7 @@ func UpdateBlockOutput(content string, blockIndex int, newOutputs []string) (str
 	return strings.Join(allLines, eol), nil
 }
 
-// CleanOutputs removes all managed output comment lines.
+// CleanOutputs removes all managed output comment lines (both inline and new-line).
 func CleanOutputs(content string) string {
 	eol := "\n"
 	if strings.Contains(content, "\r\n") {
@@ -462,9 +550,13 @@ func CleanOutputs(content string) string {
 	var kept []string
 	for _, l := range lines {
 		trimmed := strings.TrimRight(l, "\r")
-		if !isOutputComment(trimmed) {
-			kept = append(kept, trimmed)
+		if isOutputComment(trimmed) {
+			// Entire line is an output comment -> drop
+			continue
 		}
+		// Strip trailing inline output comment if present
+		cleaned, _ := stripInlineOutputComment(trimmed)
+		kept = append(kept, cleaned)
 	}
 	return strings.Join(kept, eol)
 }
