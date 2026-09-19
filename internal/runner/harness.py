@@ -6,7 +6,6 @@ import os
 import sys
 import traceback
 
-
 OUTPUT_PREFIXES = ("=>", "➜", "❯", "✕", "…")
 
 
@@ -95,14 +94,20 @@ def _extract_symbols(node):
         for sub in ast.walk(node):
             if isinstance(sub, ast.Global):
                 explicit_globals.update(sub.names)
-            elif isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Store):
-                if sub.id not in explicit_globals:
-                    local_names.add(sub.id)
+            elif (
+                isinstance(sub, ast.Name)
+                and isinstance(sub.ctx, ast.Store)
+                and sub.id not in explicit_globals
+            ):
+                local_names.add(sub.id)
 
         for sub in ast.walk(node):
-            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
-                if sub.id not in local_names:
-                    reads.add(sub.id)
+            if (
+                isinstance(sub, ast.Name)
+                and isinstance(sub.ctx, ast.Load)
+                and sub.id not in local_names
+            ):
+                reads.add(sub.id)
         return defines, reads, is_side_effect
 
     # 3. Class definitions
@@ -176,7 +181,7 @@ def _compute_dependencies(statements, target_idx):
 def run():
     try:
         payload = json.loads(sys.stdin.read())
-    except Exception as e:
+    except (json.JSONDecodeError, OSError, ValueError) as e:
         print(json.dumps({"error": f"Failed to parse payload: {e}"}))
         return
 
@@ -221,8 +226,8 @@ def run():
     # Extract all top-level statements from AST with their symbols
     statements = []
     for idx, node in enumerate(tree.body):
-        start_ln = node.lineno
-        end_ln = node.end_lineno
+        start_ln = getattr(node, "lineno", 1)
+        end_ln = getattr(node, "end_lineno", None) or start_ln
         while end_ln < len(source_lines) and _is_output_line(source_lines[end_ln]):
             end_ln += 1
 
@@ -256,7 +261,7 @@ def run():
             try:
                 val = eval(code, scope) if is_expr else exec(code, scope)
                 return buf.getvalue(), val, None
-            except Exception:
+            except (Exception, SystemExit):  # noqa: BLE001
                 return buf.getvalue(), None, sys.exc_info()
 
     target_idx = None
@@ -315,7 +320,8 @@ def run():
         all_std = captured_io.splitlines() if captured_io else []
         outputs = _format_outputs(all_std, result_repr, error_lines, max_lines)
 
-        has_existing_outputs = stmt["end_line"] > stmt["node"].end_lineno or any(
+        orig_end = getattr(stmt["node"], "end_lineno", None) or stmt["start_line"]
+        has_existing_outputs = stmt["end_line"] > orig_end or any(
             _has_output_comment(source_lines[ln - 1])
             for ln in range(stmt["start_line"], stmt["end_line"] + 1)
             if ln - 1 < len(source_lines)
