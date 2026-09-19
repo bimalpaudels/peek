@@ -183,6 +183,11 @@ func UpdateBlockOutput(content string, blockIndex int, newOutputs []string) (str
 		return "", fmt.Errorf("block index %d out of range (total %d blocks)", blockIndex, len(blocks))
 	}
 
+	eol := "\n"
+	if strings.Contains(content, "\r\n") {
+		eol = "\r\n"
+	}
+
 	lines := strings.Split(content, "\n")
 	target := blocks[blockIndex]
 
@@ -196,43 +201,70 @@ func UpdateBlockOutput(content string, blockIndex int, newOutputs []string) (str
 
 	var formattedOutputs []string
 	for _, out := range newOutputs {
-		if !strings.HasPrefix(out, outputMarkerPrefix) {
-			formattedOutputs = append(formattedOutputs, fmt.Sprintf("%s %s", outputMarkerPrefix, out))
+		cleanOut := strings.TrimRight(out, "\r\n")
+		if !strings.HasPrefix(cleanOut, outputMarkerPrefix) {
+			formattedOutputs = append(formattedOutputs, fmt.Sprintf("%s %s", outputMarkerPrefix, cleanOut))
 		} else {
-			formattedOutputs = append(formattedOutputs, out)
+			formattedOutputs = append(formattedOutputs, cleanOut)
 		}
 	}
 
 	var allLines []string
-	allLines = append(allLines, lines[:target.StartLine-1]...)
-	allLines = append(allLines, blockLines[:bodyOffset]...)
-	allLines = append(allLines, codeLines...)
+	for _, l := range lines[:target.StartLine-1] {
+		allLines = append(allLines, strings.TrimRight(l, "\r"))
+	}
+	for _, l := range blockLines[:bodyOffset] {
+		allLines = append(allLines, strings.TrimRight(l, "\r"))
+	}
+	for _, l := range codeLines {
+		allLines = append(allLines, strings.TrimRight(l, "\r"))
+	}
 	allLines = append(allLines, formattedOutputs...)
-	allLines = append(allLines, lines[target.EndLine:]...)
+	for _, l := range lines[target.EndLine:] {
+		allLines = append(allLines, strings.TrimRight(l, "\r"))
+	}
 
-	return strings.Join(allLines, "\n"), nil
+	return strings.Join(allLines, eol), nil
 }
 
 // CleanOutputs removes all lines starting with '# =>'.
 func CleanOutputs(content string) string {
+	eol := "\n"
+	if strings.Contains(content, "\r\n") {
+		eol = "\r\n"
+	}
 	lines := strings.Split(content, "\n")
 	var kept []string
 	for _, l := range lines {
-		if !strings.HasPrefix(strings.TrimSpace(l), outputMarkerPrefix) {
-			kept = append(kept, l)
+		trimmed := strings.TrimRight(l, "\r")
+		if !strings.HasPrefix(strings.TrimSpace(trimmed), outputMarkerPrefix) {
+			kept = append(kept, trimmed)
 		}
 	}
-	return strings.Join(kept, "\n")
+	return strings.Join(kept, eol)
 }
 
-// AtomicWrite writes content safely using a temporary file in the same directory.
+// AtomicWrite writes content safely using a temporary file in the same directory,
+// preserving original file permissions and resolving symlinks.
 func AtomicWrite(filePath string, content string) error {
 	absPath, err := filepath.Abs(filePath)
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(absPath)
 
+	// Resolve symlink so we write to the target file instead of overwriting the symlink itself
+	targetPath, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		targetPath = absPath
+	}
+
+	// Capture existing permissions, default to 0644 if file doesn't exist
+	var mode os.FileMode = 0644
+	if fi, err := os.Stat(targetPath); err == nil {
+		mode = fi.Mode().Perm()
+	}
+
+	dir := filepath.Dir(targetPath)
 	tmpFile, err := os.CreateTemp(dir, ".sc_tmp_*")
 	if err != nil {
 		return err
@@ -242,13 +274,26 @@ func AtomicWrite(filePath string, content string) error {
 		_ = os.Remove(tmpName)
 	}()
 
+	// Apply original permissions to temp file
+	if err := tmpFile.Chmod(mode); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+
 	if _, err := tmpFile.WriteString(content); err != nil {
 		_ = tmpFile.Close()
 		return err
 	}
+
+	// Flush to disk before renaming
+	if err := tmpFile.Sync(); err != nil {
+		_ = tmpFile.Close()
+		return err
+	}
+
 	if err := tmpFile.Close(); err != nil {
 		return err
 	}
 
-	return os.Rename(tmpName, absPath)
+	return os.Rename(tmpName, targetPath)
 }
