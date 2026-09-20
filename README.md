@@ -140,6 +140,26 @@ All scratchpad comments vanish instantly.
 
 ---
 
+## Async Execution & Top-Level Await
+
+`peek` natively supports asynchronous Python workflows without requiring wrapper functions:
+
+- **Top-Level `await`**: Evaluate async expressions and assignments directly:
+  ```python
+  res = await client.get("/items")
+  res.json()  # ➜ {"items": [1, 2, 3]}
+  ```
+- **Auto-Awaiting**: Expressions returning coroutines, `asyncio.gather(...)`, or `Task` objects are automatically resolved without requiring an explicit `await`:
+  ```python
+  asyncio.gather(fetch(1), fetch(2))  # ➜ [10, 20]
+  ```
+- **Persistent Event Loop**: A single event loop runs per file execution, allowing queues (`asyncio.Queue`), locks, background tasks, and client sessions to be shared across statements.
+- **Dependency Slicing & Side Effects**:
+  - Method calls that mutate objects (e.g. `await client.login()`, `await queue.put(x)`) are automatically tracked by the dependency slicer.
+  - Standalone void setup functions with no inputs or outputs (e.g. `await init_tables()`) affect external state without AST dataflow links. To include them during targeted line execution (`peek file.py:line`), assign them to a variable (e.g. `_ = await init_tables()`) or evaluate the whole file (`peek file.py`).
+
+---
+
 ## Project Structure
 
 ```text

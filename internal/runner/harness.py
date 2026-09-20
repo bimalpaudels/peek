@@ -413,7 +413,7 @@ def run():
                         mode="eval" if is_expr else "exec",
                     )
                     val = eval(code, scope) if is_expr else exec(code, scope)  # noqa: S102
-                    if is_expr and inspect.iscoroutine(val):
+                    if is_expr and inspect.isawaitable(val):
                         val = loop.run_until_complete(val)
                     return buf.getvalue(), val, None
             except (Exception, SystemExit):  # noqa: BLE001

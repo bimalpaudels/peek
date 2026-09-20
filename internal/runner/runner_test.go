@@ -367,4 +367,24 @@ async def agen():
 	}
 }
 
+func TestPythonRunner_AsyncGatherAutoAwait(t *testing.T) {
+	source := `import asyncio
+
+async def fetch(x):
+    await asyncio.sleep(0.001)
+    return x * 10
+
+asyncio.gather(fetch(1), fetch(2))
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "[10, 20]") {
+		t.Errorf("expected auto-awaited asyncio.gather output, got: %s", out)
+	}
+}
+
+
 
