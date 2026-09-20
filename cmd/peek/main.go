@@ -29,6 +29,7 @@ Options:
   --clean                      Remove all scratchpad output comments
   --max-lines int              Max output lines per statement (default 30)
   --timeout int                Execution timeout in seconds (default 10)
+  --config                     Print config file path (auto-creates if missing)
   -v, --version                Show version information
   -h, --help                   Show this help message
 `, Version)
@@ -51,6 +52,10 @@ func parseArgs(args []string, userCfg ...*config.Config) (filePath string, lineN
 			os.Exit(0)
 		case args[i] == "-v" || args[i] == "--version":
 			fmt.Printf("peek v%s\n", Version)
+			os.Exit(0)
+		case args[i] == "--config":
+			path, _ := config.EnsureConfigFile()
+			fmt.Println(path)
 			os.Exit(0)
 		case args[i] == "--clean":
 			clean = true

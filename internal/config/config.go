@@ -34,11 +34,16 @@ func DefaultConfig() *Config {
 
 // GetConfigPath returns the standard location of the configuration file (~/.config/peek/config.toml).
 func GetConfigPath() string {
-	configDir, err := os.UserConfigDir()
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		configDir = filepath.Join(home, ".config")
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); strings.TrimSpace(xdg) != "" {
+		return filepath.Join(xdg, "peek", "config.toml")
 	}
+
+	home, err := os.UserHomeDir()
+	if err == nil && home != "" {
+		return filepath.Join(home, ".config", "peek", "config.toml")
+	}
+
+	configDir, _ := os.UserConfigDir()
 	return filepath.Join(configDir, "peek", "config.toml")
 }
 
@@ -112,11 +117,57 @@ func Parse(content string) (*Config, error) {
 	return cfg, nil
 }
 
-// Load reads the global config file if present, or returns the defaults if missing.
+const DefaultConfigTemplate = `# peek configuration file
+
+# Maximum lines of output per statement before truncation
+max_lines = 30
+
+# Execution timeout in seconds
+timeout = 10
+
+# Maximum line width for inline comment formatting
+line_width = 100
+
+# Maximum character length for strings in dictionaries before truncation
+max_str_len = 140
+
+# Automatically search for and load .env files
+load_env = true
+
+# Optional custom path to uv binary (defaults to auto-detection)
+# uv_path = "/usr/local/bin/uv"
+
+# Optional Python version for uv execution (defaults to system uv default)
+# python_version = "3.12"
+`
+
+// EnsureConfigFile creates the default configuration file if it does not already exist.
+func EnsureConfigFile() (string, error) {
+	path := GetConfigPath()
+	if _, err := os.Stat(path); err == nil {
+		return path, nil
+	}
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return path, err
+	}
+
+	if err := os.WriteFile(path, []byte(DefaultConfigTemplate), 0644); err != nil {
+		return path, err
+	}
+
+	return path, nil
+}
+
+// Load reads the global config file if present, auto-creates it if missing,
+// or returns the defaults on any error.
 func Load() *Config {
 	path := GetConfigPath()
 	data, err := os.ReadFile(path)
 	if err != nil {
+		// Attempt to auto-create the starter config template
+		_, _ = EnsureConfigFile()
 		return DefaultConfig()
 	}
 	cfg, err := Parse(string(data))
