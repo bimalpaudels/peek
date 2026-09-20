@@ -70,6 +70,46 @@ def _normalize_obj(obj, depth=0, max_depth=5):
     return obj
 
 
+def _compact_val(v, max_str=140):
+    if v is None or isinstance(v, (int, float, bool)):
+        return repr(v)
+    if isinstance(v, str):
+        if len(v) > max_str:
+            return repr(v[:max_str] + "…")
+        return repr(v)
+    if isinstance(v, dict):
+        if not v:
+            return "{}"
+        if len(v) <= 4:
+            natural = "{" + ", ".join(f"{repr(k)}: {repr(val)}" for k, val in v.items()) + "}"
+            if len(natural) <= 100:
+                return natural
+        if len(v) <= 3:
+            items = [f"{repr(k)}: {_compact_val(val, max_str=40)}" for k, val in v.items()]
+            s = "{" + ", ".join(items) + "}"
+            if len(s) <= 100:
+                return s
+        items = [f"{repr(k)}: {_compact_val(val, max_str=30)}" for k, val in list(v.items())[:2]]
+        items.append(f"… ({len(v)} keys)")
+        return "{" + ", ".join(items) + "}"
+    if isinstance(v, (list, tuple, set)):
+        if not v:
+            return "[]" if isinstance(v, list) else ("()" if isinstance(v, tuple) else "set()")
+        open_b, close_b = ("[", "]") if isinstance(v, list) else (("(", ")") if isinstance(v, tuple) else ("{", "}"))
+        if len(v) <= 5:
+            natural = open_b + ", ".join(repr(x) for x in v) + close_b
+            if len(natural) <= 100:
+                return natural
+        if len(v) <= 2:
+            s = open_b + ", ".join(_compact_val(x, max_str=50) for x in v) + close_b
+            if len(s) <= 100:
+                return s
+        items = [_compact_val(x, max_str=35) for x in list(v)[:2]]
+        items.append(f"… ({len(v)} items)")
+        return open_b + ", ".join(items) + close_b
+    return repr(v)
+
+
 def _format_value(val):
     if val is None:
         return None
@@ -77,16 +117,26 @@ def _format_value(val):
     normalized = _normalize_obj(val)
     rep = repr(normalized)
 
-    # If it fits within 60 chars on a single line, keep compact representation
-    if len(rep) <= 60 and "\n" not in rep:
+    # 1. If it fits on a single line (<= 80 chars), keep compact representation inline
+    if len(rep) <= 80 and "\n" not in rep:
         return rep
 
-    # Pretty-print multi-line for complex or large structures
-    if isinstance(normalized, (dict, list, tuple, set)):
-        try:
-            return pprint.pformat(normalized, sort_dicts=False, width=60, compact=False)
-        except Exception:
-            return rep
+    # 2. Top-level Dict: strictly 1 line per key
+    if isinstance(normalized, dict):
+        lines = ["{"]
+        for k, v in normalized.items():
+            lines.append(f"  {repr(k)}: {_compact_val(v)},")
+        lines.append("}")
+        return "\n".join(lines)
+
+    # 3. Top-level List / Tuple / Set: 1 line per item
+    if isinstance(normalized, (list, tuple, set)):
+        open_b, close_b = ("[", "]") if isinstance(normalized, list) else (("(", ")") if isinstance(normalized, tuple) else ("{", "}"))
+        lines = [open_b]
+        for item in normalized:
+            lines.append(f"  {_compact_val(item, max_str=80)},")
+        lines.append(close_b)
+        return "\n".join(lines)
 
     return rep
 
