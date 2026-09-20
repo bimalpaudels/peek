@@ -123,6 +123,88 @@ Add to `~/.config/zed/keymap.json`:
 
 ## Usage
 
+1. **Evaluate at cursor**: Place your cursor on any line in your `.py` file and press `Shift + Enter`. `peek` slices the code, runs required upstream dependencies, and writes the output right into your file.
+2. **Clean up**: When you're done tinkering or ready to commit, press `Cmd + Shift + C` to wipe all generated comments clean.
+
+## Examples
+
+### Inline vs. Block Output
+
+Single-line values fit inline, while printed stdout and exceptions drop directly underneath:
+
+```python
+# Inline expression
+x = 10 * 42
+x  # ➜ 420
+
+# Captured stdout
+print("Fetching records...")
+# ❯ Fetching records...
+
+# Errors & exceptions
+1 / 0
+# ✕ ZeroDivisionError: division by zero
+```
+
+### Formatted Dictionaries & Collections
+
+Larger dictionaries and collections automatically format 1 line per key/item beneath the statement:
+
+```python
+user = {
+    "id": 101,
+    "name": "Alex",
+    "roles": ["admin", "developer"],
+    "active": True,
+}
+user
+# ➜ {
+# ➜   'id': 101,
+# ➜   'name': 'Alex',
+# ➜   'roles': ['admin', 'developer'],
+# ➜   'active': True,
+# ➜ }
+```
+
+### Async & Top-Level Await
+
+No wrapper functions needed. Top-level `await` works directly, and coroutine expressions or `asyncio.gather(...)` auto-resolve:
+
+```python
+import asyncio
+
+async def fetch_val(n):
+    return n * 10
+
+await fetch_val(5)  # ➜ 50
+asyncio.gather(fetch_val(1), fetch_val(2))  # ➜ [10, 20]
+```
+
+### Dependency Slicing
+
+Targeting a line runs only what that line needs, skipping unrelated or heavy setup:
+
+```python
+# Expensive setup (automatically skipped!)
+data = load_large_dataset()
+
+# Target line 5 with your cursor
+y = 10 * 42
+y  # ➜ 420 (runs instantly; line 2 is never executed)
+```
+
+> 💡 **Looking for more?** See the [`examples/`](./examples) directory for complete scripts:
+> - [`01_basics.py`](./examples/01_basics.py): Expressions, stdout, errors, dict & list formatting
+> - [`02_slicing.py`](./examples/02_slicing.py): Dependency tree-shaking & object mutations
+> - [`03_async_showcase.py`](./examples/03_async_showcase.py): Top-level await, auto-await, shared event loops
+> - [`04_errors_and_tracebacks.py`](./examples/04_errors_and_tracebacks.py): Traceback snippets & exception handling
+> - [`05_pipeline.py`](./examples/05_pipeline.py): Multi-stage data pipelines
+> - [`06_algorithms_and_tricks.py`](./examples/06_algorithms_and_tricks.py): Dataclasses, algorithms & comprehensions
+
+## CLI Usage
+
+You can also run `peek` directly from your terminal:
+
 ```bash
 # Evaluate statement/block at cursor line 21
 peek solution.py:21
@@ -136,40 +218,6 @@ peek solution.py --clean
 # Custom output line limit (default 30) or timeout (default 10s)
 peek solution.py:21 --max-lines 50 --timeout 5
 ```
-
-## Examples
-
-### Inline Output & Cleanup
-
-```python
-# Before
-nums = [1, 2, 3, 4]
-squared = [x**2 for x in nums]
-squared
-print("Done!")
-
-# Run: peek solution.py
-nums = [1, 2, 3, 4]
-squared = [x**2 for x in nums]
-squared  # ➜ [1, 4, 9, 16]
-print("Done!")
-# ❯ Done!
-```
-
-Run `peek solution.py --clean` and all comments vanish instantly.
-
-### Dependency Slicing
-
-```python
-# Expensive setup (will be skipped!)
-data = load_large_dataset()
-
-# Target line 5 with `peek solution.py:5`
-y = 10 * 42
-y  # ➜ 420 (runs instantly; data loading is never executed)
-```
-
-> 💡 **Looking for more?** See the [`examples/`](./examples) directory for different scripts.
 
 ## Development
 
