@@ -4,7 +4,7 @@
 
 `peek` runs Python code directly inside your `.py` files and writes the output right next to your code as comments (`x  # ➜ 10`).
 
-No notebooks. No copy-pasting back and forth into terminal REPLs. Just write standard Python, evaluate a line or the whole file, see what happened right there, and wipe the comments clean whenever you're done.
+No notebooks. No terminal REPLs or executions. Just write standard Python, evaluate a line, see what happened right there, and wipe the comments whenever you're done.
 
 ---
 
@@ -169,13 +169,7 @@ y = 10 * 42
 y  # ➜ 420 (runs instantly; data loading is never executed)
 ```
 
-> 💡 **Looking for more?** See the [`examples/`](./examples) directory for complete scripts:
-> - [`01_basics.py`](./examples/01_basics.py): Expressions, stdout, errors, dict & list formatting
-> - [`02_slicing.py`](./examples/02_slicing.py): Dependency tree-shaking & object mutations
-> - [`03_async_showcase.py`](./examples/03_async_showcase.py): Top-level await, auto-await, shared event loops
-> - [`04_errors_and_tracebacks.py`](./examples/04_errors_and_tracebacks.py): Traceback snippets & exception handling
-> - [`05_pipeline.py`](./examples/05_pipeline.py): Multi-stage data pipelines
-> - [`06_algorithms_and_tricks.py`](./examples/06_algorithms_and_tricks.py): Dataclasses, algorithms & comprehensions
+> 💡 **Looking for more?** See the [`examples/`](./examples) directory for different scripts.
 
 ## Development
 
@@ -219,6 +213,8 @@ go test ./...
 
 ### What's coming
 - **Multi-language runners**: Built in Go so the core orchestrator can support runners for TypeScript and Go
+- **As IDE-Extensions**: For easier integration to the workflow.
+- **Config file**: While there exists a config file now, it isn't strongly integrated yet.
 
 ## Why was this made?
 
