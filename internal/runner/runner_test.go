@@ -287,4 +287,84 @@ fetch_data(30)
 	}
 }
 
+func TestPythonRunner_AsyncStateAcrossStatements(t *testing.T) {
+	source := `import asyncio
+
+queue = asyncio.Queue()
+await queue.put("shared_item")
+item = await queue.get()
+item
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "'shared_item'") {
+		t.Errorf("expected shared queue item, got: %s", out)
+	}
+}
+
+func TestPythonRunner_AsyncScopeHygiene(t *testing.T) {
+	source := `import asyncio
+
+async def fail():
+    raise ValueError("intentional error")
+
+try:
+    await fail()
+except Exception:
+    pass
+
+"__peek_result__" in globals()
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "False") {
+		t.Errorf("expected __peek_result__ to not leak into globals, got: %s", out)
+	}
+}
+
+func TestPythonRunner_AsyncNestedInSync(t *testing.T) {
+	source := `def make_handler():
+    async def inner():
+        return 99
+    return inner
+
+h = make_handler()
+h()
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "99") {
+		t.Errorf("expected auto-awaited result from inner coroutine, got: %s", out)
+	}
+}
+
+func TestPythonRunner_AsyncComprehension(t *testing.T) {
+	source := `import asyncio
+
+async def agen():
+    for i in range(3):
+        await asyncio.sleep(0.001)
+        yield i * 5
+
+[x async for x in agen()]
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "[0, 5, 10]") {
+		t.Errorf("expected async comprehension output, got: %s", out)
+	}
+}
+
 

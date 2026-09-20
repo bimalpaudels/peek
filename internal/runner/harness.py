@@ -45,6 +45,21 @@ def _get_root_name(node):
     return None
 
 
+def _has_top_level_async(node):
+    """Check if node contains top-level async constructs without descending into inner function or class definitions."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return False
+    stack = [node]
+    while stack:
+        curr = stack.pop()
+        if isinstance(curr, (ast.Await, ast.AsyncFor, ast.AsyncWith)) or getattr(curr, "is_async", 0):
+            return True
+        for child in ast.iter_child_nodes(curr):
+            if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                stack.append(child)
+    return False
+
+
 def _normalize_obj(obj, depth=0, max_depth=5):
     if depth > max_depth:
         return "…"
@@ -354,12 +369,12 @@ def run():
         "__builtins__": __builtins__,
     }
 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     def execute_node(node):
         is_expr = isinstance(node, ast.Expr)
-        has_async = any(
-            isinstance(sub, (ast.Await, ast.AsyncFor, ast.AsyncWith))
-            for sub in ast.walk(node)
-        )
+        has_async = _has_top_level_async(node)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             try:
@@ -380,13 +395,17 @@ def run():
                         mode="exec",
                         flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
                     )
-                    if code.co_flags & inspect.CO_COROUTINE:
-                        func = types.FunctionType(code, scope)
-                        asyncio.run(func())
-                    else:
-                        exec(code, scope)  # noqa: S102
-                    val = scope.pop("__peek_result__", None) if is_expr else None
-                    return buf.getvalue(), val, None
+                    try:
+                        if code.co_flags & inspect.CO_COROUTINE:
+                            func = types.FunctionType(code, scope)
+                            loop.run_until_complete(func())
+                        else:
+                            exec(code, scope)  # noqa: S102
+                        val = scope.pop("__peek_result__", None) if is_expr else None
+                        return buf.getvalue(), val, None
+                    finally:
+                        if is_expr:
+                            scope.pop("__peek_result__", None)
                 else:
                     code = compile(
                         ast.Expression(body=node.value) if is_expr else ast.Module(body=[node], type_ignores=[]),
@@ -395,95 +414,109 @@ def run():
                     )
                     val = eval(code, scope) if is_expr else exec(code, scope)  # noqa: S102
                     if is_expr and inspect.iscoroutine(val):
-                        val = asyncio.run(val)
+                        val = loop.run_until_complete(val)
                     return buf.getvalue(), val, None
             except (Exception, SystemExit):  # noqa: BLE001
                 return buf.getvalue(), None, sys.exc_info()
 
-    target_idx = None
-    if target_line is not None:
-        for idx, stmt in enumerate(statements):
-            if stmt["start_line"] <= target_line <= stmt["end_line"]:
-                target_idx = idx
-                break
+    try:
+        target_idx = None
+        if target_line is not None:
+            for idx, stmt in enumerate(statements):
+                if stmt["start_line"] <= target_line <= stmt["end_line"]:
+                    target_idx = idx
+                    break
 
-        # If target_line lands on a blank line or comment: strict no-op
-        if target_idx is None:
-            print(json.dumps({"blocks": []}))
-            return
-
-        # If target statement is an inert declaration (FunctionDef, AsyncFunctionDef, ClassDef): strict no-op
-        target_node = statements[target_idx]["node"]
-        if isinstance(target_node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            print(json.dumps({"blocks": []}))
-            return
-
-    # If target_line is specified, apply program slicing
-    needed_indices = set(range(len(statements)))
-    if target_idx is not None:
-        needed_indices = set(_compute_dependencies(statements, target_idx))
-
-    results = []
-
-    for stmt in statements:
-        if stmt["index"] not in needed_indices:
-            continue
-
-        captured_io, val, exc_info = execute_node(stmt["node"])
-
-        # Silent upstream execution
-        if target_idx is not None and stmt["index"] < target_idx:
-            if exc_info:
-                err_line = traceback.format_exception_only(exc_info[0], exc_info[1])[-1].strip()
-                print(
-                    json.dumps({
-                        "error": f"Upstream statement at line {stmt['start_line']} error: {err_line}",
-                        "blocks": [],
-                    })
-                )
+            # If target_line lands on a blank line or comment: strict no-op
+            if target_idx is None:
+                print(json.dumps({"blocks": []}))
                 return
-            continue
 
-        result_repr = _format_value(val, max_str=max_str_len)
-        error_lines = []
-        if exc_info:
-            tb = traceback.format_exception(*exc_info)
-            filtered = []
-            skip = False
-            for l in tb:
-                if any(x in l for x in ("harness.py", "asyncio/runners.py", "asyncio/base_events.py")) or (
-                    "<string>" in l and "exec(" in l
-                ):
-                    skip = True
-                    continue
-                if skip and l.startswith("    "):
-                    continue
+            # If target statement is an inert declaration (FunctionDef, AsyncFunctionDef, ClassDef): strict no-op
+            target_node = statements[target_idx]["node"]
+            if isinstance(target_node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                print(json.dumps({"blocks": []}))
+                return
+
+        # If target_line is specified, apply program slicing
+        needed_indices = set(range(len(statements)))
+        if target_idx is not None:
+            needed_indices = set(_compute_dependencies(statements, target_idx))
+
+        results = []
+
+        for stmt in statements:
+            if stmt["index"] not in needed_indices:
+                continue
+
+            captured_io, val, exc_info = execute_node(stmt["node"])
+
+            # Silent upstream execution
+            if target_idx is not None and stmt["index"] < target_idx:
+                if exc_info:
+                    err_line = traceback.format_exception_only(exc_info[0], exc_info[1])[-1].strip()
+                    print(
+                        json.dumps({
+                            "error": f"Upstream statement at line {stmt['start_line']} error: {err_line}",
+                            "blocks": [],
+                        })
+                    )
+                    return
+                continue
+
+            result_repr = _format_value(val, max_str=max_str_len)
+            error_lines = []
+            if exc_info:
+                tb = traceback.format_exception(*exc_info)
+                filtered = []
                 skip = False
-                filtered.append(l)
-            error_lines = "".join(filtered).strip().splitlines()
+                for l in tb:
+                    if any(x in l for x in ("harness.py", "asyncio/runners.py", "asyncio/base_events.py")) or (
+                        "<string>" in l and "exec(" in l
+                    ):
+                        skip = True
+                        continue
+                    if skip and l.startswith("    "):
+                        continue
+                    skip = False
+                    filtered.append(l)
+                error_lines = "".join(filtered).strip().splitlines()
 
-        all_std = captured_io.splitlines() if captured_io else []
-        outputs = _format_outputs(all_std, result_repr, error_lines, max_lines)
+            all_std = captured_io.splitlines() if captured_io else []
+            outputs = _format_outputs(all_std, result_repr, error_lines, max_lines)
 
-        orig_end = getattr(stmt["node"], "end_lineno", None) or stmt["start_line"]
-        has_existing_outputs = stmt["end_line"] > orig_end or any(
-            _has_output_comment(source_lines[ln - 1])
-            for ln in range(stmt["start_line"], stmt["end_line"] + 1)
-            if ln - 1 < len(source_lines)
-        )
-        if target_idx is not None or outputs or has_existing_outputs:
-            results.append({
-                "start_line": stmt["start_line"],
-                "end_line": stmt["end_line"],
-                "outputs": outputs,
-            })
-            if target_idx is not None:
+            orig_end = getattr(stmt["node"], "end_lineno", None) or stmt["start_line"]
+            has_existing_outputs = stmt["end_line"] > orig_end or any(
+                _has_output_comment(source_lines[ln - 1])
+                for ln in range(stmt["start_line"], stmt["end_line"] + 1)
+                if ln - 1 < len(source_lines)
+            )
+            if target_idx is not None or outputs or has_existing_outputs:
+                results.append({
+                    "start_line": stmt["start_line"],
+                    "end_line": stmt["end_line"],
+                    "outputs": outputs,
+                })
+                if target_idx is not None:
+                    break
+
+            if error_lines:
                 break
 
-        if error_lines:
-            break
-
-    print(json.dumps({"blocks": results}))
+        print(json.dumps({"blocks": results}))
+    finally:
+        try:
+            pending = asyncio.all_tasks(loop)
+            for t in pending:
+                t.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
 
 
 if __name__ == "__main__":
