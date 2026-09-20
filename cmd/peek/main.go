@@ -14,10 +14,20 @@ import (
 	"peek/internal/runner"
 )
 
-var Version = "0.1.1"
+var Version = "dev"
+
+func getFormattedVersion() string {
+	if Version == "dev" {
+		return "dev"
+	}
+	if strings.HasPrefix(Version, "v") {
+		return Version
+	}
+	return "v" + Version
+}
 
 func printUsage() {
-	fmt.Fprintf(os.Stderr, `peek: universal fast in-file scratchpad (v%s)
+	fmt.Fprintf(os.Stderr, `peek: universal fast in-file scratchpad (%s)
 
 Usage:
   peek <file:line>             Evaluate statement/block at line number (e.g. peek main.py:15)
@@ -32,7 +42,7 @@ Options:
   --config                     Print config file path (auto-creates if missing)
   -v, --version                Show version information
   -h, --help                   Show this help message
-`, Version)
+`, getFormattedVersion())
 }
 
 func parseArgs(args []string, userCfg ...*config.Config) (filePath string, lineNo *int, clean bool, maxLines int, timeout int, err error) {
@@ -51,7 +61,7 @@ func parseArgs(args []string, userCfg ...*config.Config) (filePath string, lineN
 			printUsage()
 			os.Exit(0)
 		case args[i] == "-v" || args[i] == "--version":
-			fmt.Printf("peek v%s\n", Version)
+			fmt.Printf("peek %s\n", getFormattedVersion())
 			os.Exit(0)
 		case args[i] == "--config":
 			path, _ := config.EnsureConfigFile()

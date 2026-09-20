@@ -5,7 +5,7 @@ CMD_DIR     := ./cmd/peek
 # Installation directory (defaults to ~/.local/bin, override via: make install INSTALL_DIR=/usr/local/bin)
 INSTALL_DIR ?= $(HOME)/.local/bin
 
-VERSION     ?= 0.1.0
+VERSION     ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 
 # Go build flags: strip DWARF and symbol table for minimal binary footprint, inject version
 LDFLAGS := -s -w -X main.Version=$(VERSION)
