@@ -229,9 +229,7 @@ go test ./...
 - **Editor agnostic**: Works anywhere you can map a keybinding to a shell command.
 
 ### What's coming
-- **Multi-language runners**: Built in Go so the core orchestrator can support runners for JavaScript/TypeScript, Go, Rust, and others down the road.
-- **Watch mode**: Auto-evaluate targeted statements or files on file save.
-- **Custom formatters**: Configurable formatting for complex objects, dataclasses, and mini table previews.
+- **Multi-language runners**: Built in Go so the core orchestrator can support runners for TypeScript and Go
 
 ## Why was this made?
 
