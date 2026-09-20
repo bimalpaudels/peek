@@ -14,7 +14,7 @@ import (
 	"peek/internal/runner"
 )
 
-var Version = "0.1.0"
+var Version = "0.1.1"
 
 func printUsage() {
 	fmt.Fprintf(os.Stderr, `peek: universal fast in-file scratchpad (v%s)
