@@ -2,6 +2,11 @@ package runner
 
 import (
 	"context"
+	"fmt"
+	"path/filepath"
+	"strings"
+
+	"peek/internal/config"
 )
 
 // BlockResult represents the execution output and location of a single block.
@@ -28,4 +33,31 @@ type ExecutionResult struct {
 // Runner represents a language-specific execution engine.
 type Runner interface {
 	Execute(ctx context.Context, filePath string, source string, targetLine *int, maxLines int) (*ExecutionResult, error)
+	CommentPrefix() string
 }
+
+// ForFile returns the appropriate language Runner for the target file path.
+func ForFile(filePath string, cfg *config.Config) (Runner, error) {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".py":
+		uvPath := ""
+		if cfg != nil {
+			uvPath = cfg.UVPath
+		}
+		pyRunner, err := NewPythonRunner(uvPath)
+		if err != nil {
+			return nil, err
+		}
+		if cfg != nil {
+			pyRunner.MaxStrLen = cfg.MaxStrLen
+			pyRunner.PythonVersion = cfg.PythonVersion
+		}
+		return pyRunner, nil
+	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs":
+		return nil, fmt.Errorf("typescript/javascript runner (bun) is not yet implemented")
+	default:
+		return nil, fmt.Errorf("unsupported file type: %q", ext)
+	}
+}
+

@@ -17,6 +17,7 @@ type Config struct {
 	LoadEnv       bool   `json:"load_env"`
 	UVPath        string `json:"uv_path"`
 	PythonVersion string `json:"python_version"`
+	BunPath       string `json:"bun_path"`
 }
 
 // DefaultConfig returns the standard built-in configuration defaults.
@@ -29,6 +30,7 @@ func DefaultConfig() *Config {
 		LoadEnv:       true,
 		UVPath:        "",
 		PythonVersion: "",
+		BunPath:       "",
 	}
 }
 
@@ -112,6 +114,8 @@ func Parse(content string) (*Config, error) {
 			cfg.UVPath = val
 		case "python_version":
 			cfg.PythonVersion = val
+		case "bun_path":
+			cfg.BunPath = val
 		}
 	}
 	return cfg, nil
@@ -139,6 +143,9 @@ load_env = true
 
 # Optional Python version for uv execution (defaults to system uv default)
 # python_version = "3.12"
+
+# Optional custom path to bun binary (defaults to auto-detection)
+# bun_path = "/usr/local/bin/bun"
 `
 
 // EnsureConfigFile creates the default configuration file if it does not already exist.

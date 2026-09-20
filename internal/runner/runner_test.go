@@ -386,5 +386,35 @@ asyncio.gather(fetch(1), fetch(2))
 	}
 }
 
+func TestForFile(t *testing.T) {
+	// 1. Python file returns PythonRunner with prefix #
+	r, err := ForFile("test.py", nil)
+	if err != nil {
+		// In environments without uv installed, ForFile returns uv not found error, which is expected
+		if !strings.Contains(err.Error(), "requires 'uv'") {
+			t.Fatalf("unexpected error for test.py: %v", err)
+		}
+	} else {
+		if r.CommentPrefix() != "#" {
+			t.Errorf("expected comment prefix # for python, got %q", r.CommentPrefix())
+		}
+	}
+
+	// 2. TypeScript / JavaScript file returns not yet implemented error (ready for bun)
+	for _, ext := range []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"} {
+		_, err := ForFile("app"+ext, nil)
+		if err == nil || !strings.Contains(err.Error(), "not yet implemented") {
+			t.Errorf("expected 'not yet implemented' error for %s, got %v", ext, err)
+		}
+	}
+
+	// 3. Unsupported file type returns error
+	_, err = ForFile("notes.txt", nil)
+	if err == nil || !strings.Contains(err.Error(), "unsupported file type") {
+		t.Errorf("expected unsupported file type error, got %v", err)
+	}
+}
+
+
 
 

@@ -54,6 +54,11 @@ func NewPythonRunner(customUVPath ...string) (*PythonRunner, error) {
 	}, nil
 }
 
+func (p *PythonRunner) CommentPrefix() string {
+	return "#"
+}
+
+
 //go:embed harness.py
 var pythonHarness string
 

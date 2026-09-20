@@ -153,18 +153,16 @@ func main() {
 		return
 	}
 
-	pyRunner, err := runner.NewPythonRunner(cfg.UVPath)
+	r, err := runner.ForFile(absPath, cfg)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "peek error: %v\n", err)
 		os.Exit(1)
 	}
-	pyRunner.MaxStrLen = cfg.MaxStrLen
-	pyRunner.PythonVersion = cfg.PythonVersion
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
 
-	result, err := pyRunner.Execute(ctx, absPath, content, lineNo, maxLines)
+	result, err := r.Execute(ctx, absPath, content, lineNo, maxLines)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "peek runner error: %v\n", err)
 		os.Exit(1)
@@ -184,7 +182,7 @@ func main() {
 		return
 	}
 
-	updated, err := parser.ApplyBlockOutputs(content, result.Blocks, cfg.LineWidth)
+	updated, err := parser.ApplyBlockOutputs(content, result.Blocks, r.CommentPrefix(), cfg.LineWidth)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "peek error updating output: %v\n", err)
 		os.Exit(1)
