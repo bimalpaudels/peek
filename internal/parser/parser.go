@@ -88,9 +88,14 @@ func stripInlineOutputComment(line string) (string, bool) {
 // ApplyBlockOutputs splices the formatted outputs of the given blocks into content.
 // Short single-line expression outputs are attached inline (e.g. `x  # ➜ 10`),
 // while multi-line, long, or printed (stdout) outputs are placed below.
-func ApplyBlockOutputs(content string, blockResults []runner.BlockResult) (string, error) {
+func ApplyBlockOutputs(content string, blockResults []runner.BlockResult, lineWidth ...int) (string, error) {
 	if len(blockResults) == 0 {
 		return content, nil
+	}
+
+	maxLineWidth := 100
+	if len(lineWidth) > 0 && lineWidth[0] > 0 {
+		maxLineWidth = lineWidth[0]
 	}
 
 	eol := "\n"
@@ -132,7 +137,7 @@ func ApplyBlockOutputs(content string, blockResults []runner.BlockResult) (strin
 		// 4. Combined length fits within 100 characters
 		isInline := len(b.Outputs) == 1 && len(codeLines) == 1 &&
 			strings.HasPrefix(strings.TrimSpace(b.Outputs[0]), "➜") &&
-			len(lines[startIdx])+2+len(formatOutputComment(b.Outputs[0])) <= 100
+			len(lines[startIdx])+2+len(formatOutputComment(b.Outputs[0])) <= maxLineWidth
 
 		var newBlock []string
 		if isInline {

@@ -110,7 +110,7 @@ def _compact_val(v, max_str=140):
     return repr(v)
 
 
-def _format_value(val):
+def _format_value(val, max_str=140):
     if val is None:
         return None
 
@@ -125,7 +125,7 @@ def _format_value(val):
     if isinstance(normalized, dict):
         lines = ["{"]
         for k, v in normalized.items():
-            lines.append(f"  {repr(k)}: {_compact_val(v)},")
+            lines.append(f"  {repr(k)}: {_compact_val(v, max_str=max_str)},")
         lines.append("}")
         return "\n".join(lines)
 
@@ -134,7 +134,7 @@ def _format_value(val):
         open_b, close_b = ("[", "]") if isinstance(normalized, list) else (("(", ")") if isinstance(normalized, tuple) else ("{", "}"))
         lines = [open_b]
         for item in normalized:
-            lines.append(f"  {_compact_val(item, max_str=80)},")
+            lines.append(f"  {_compact_val(item, max_str=max_str)},")
         lines.append(close_b)
         return "\n".join(lines)
 
@@ -290,6 +290,7 @@ def run():
     source = payload.get("source") or ""
     target_line = payload.get("target_line")
     max_lines = payload.get("max_lines") or 30
+    max_str_len = payload.get("max_str_len") or 140
 
     if file_path and file_path != "<scratchpad>":
         file_dir = os.path.dirname(os.path.abspath(file_path))
@@ -409,7 +410,7 @@ def run():
                 return
             continue
 
-        result_repr = _format_value(val)
+        result_repr = _format_value(val, max_str=max_str_len)
         error_lines = []
         if exc_info:
             tb = traceback.format_exception(*exc_info)

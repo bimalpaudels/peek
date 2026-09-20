@@ -14,24 +14,32 @@ import (
 
 // PythonRunner executes Python code strictly using `uv run python`.
 type PythonRunner struct {
-	UVPath string
+	UVPath        string
+	PythonVersion string
+	MaxStrLen     int
 }
 
-func NewPythonRunner() (*PythonRunner, error) {
-	// Look for uv in PATH or standard user directories
-	uvPath, err := exec.LookPath("uv")
-	if err != nil {
-		home, _ := os.UserHomeDir()
-		candidates := []string{
-			filepath.Join(home, ".local", "bin", "uv"),
-			filepath.Join(home, ".cargo", "bin", "uv"),
-			"/opt/homebrew/bin/uv",
-			"/usr/local/bin/uv",
-		}
-		for _, c := range candidates {
-			if fi, err := os.Stat(c); err == nil && fi.Mode()&0111 != 0 {
-				uvPath = c
-				break
+func NewPythonRunner(customUVPath ...string) (*PythonRunner, error) {
+	var uvPath string
+	if len(customUVPath) > 0 && strings.TrimSpace(customUVPath[0]) != "" {
+		uvPath = strings.TrimSpace(customUVPath[0])
+	} else {
+		// Look for uv in PATH or standard user directories
+		var err error
+		uvPath, err = exec.LookPath("uv")
+		if err != nil {
+			home, _ := os.UserHomeDir()
+			candidates := []string{
+				filepath.Join(home, ".local", "bin", "uv"),
+				filepath.Join(home, ".cargo", "bin", "uv"),
+				"/opt/homebrew/bin/uv",
+				"/usr/local/bin/uv",
+			}
+			for _, c := range candidates {
+				if fi, err := os.Stat(c); err == nil && fi.Mode()&0111 != 0 {
+					uvPath = c
+					break
+				}
 			}
 		}
 	}
@@ -40,7 +48,10 @@ func NewPythonRunner() (*PythonRunner, error) {
 		return nil, fmt.Errorf("peek requires 'uv' to run Python, but 'uv' was not found on PATH.\nPlease install uv: curl -LsSf https://astral.sh/uv/install.sh | sh")
 	}
 
-	return &PythonRunner{UVPath: uvPath}, nil
+	return &PythonRunner{
+		UVPath:    uvPath,
+		MaxStrLen: 140,
+	}, nil
 }
 
 //go:embed harness.py
@@ -51,6 +62,7 @@ type pythonPayload struct {
 	Source     string `json:"source"`
 	TargetLine *int   `json:"target_line,omitempty"`
 	MaxLines   int    `json:"max_lines"`
+	MaxStrLen  int    `json:"max_str_len,omitempty"`
 }
 
 func (p *PythonRunner) Execute(
@@ -66,11 +78,17 @@ func (p *PythonRunner) Execute(
 	}
 	dir := filepath.Dir(absPath)
 
+	maxStr := p.MaxStrLen
+	if maxStr <= 0 {
+		maxStr = 140
+	}
+
 	payloadBytes, err := json.Marshal(pythonPayload{
 		FilePath:   absPath,
 		Source:     source,
 		TargetLine: targetLine,
 		MaxLines:   maxLines,
+		MaxStrLen:  maxStr,
 	})
 	if err != nil {
 		return nil, err
@@ -78,11 +96,17 @@ func (p *PythonRunner) Execute(
 
 	harnessPath := getHarnessPath()
 	var cmd *exec.Cmd
-	if harnessPath != "" {
-		cmd = exec.CommandContext(ctx, p.UVPath, "run", "python", harnessPath)
-	} else {
-		cmd = exec.CommandContext(ctx, p.UVPath, "run", "python", "-c", pythonHarness)
+	args := []string{"run"}
+	if p.PythonVersion != "" {
+		args = append(args, "--python", p.PythonVersion)
 	}
+	args = append(args, "python")
+	if harnessPath != "" {
+		args = append(args, harnessPath)
+	} else {
+		args = append(args, "-c", pythonHarness)
+	}
+	cmd = exec.CommandContext(ctx, p.UVPath, args...)
 	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(payloadBytes)
 
