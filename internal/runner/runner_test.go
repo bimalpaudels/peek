@@ -246,3 +246,45 @@ small
 	}
 }
 
+func TestPythonRunner_AsyncExecution(t *testing.T) {
+	source := `import asyncio
+
+async def fetch_data(val):
+    await asyncio.sleep(0.001)
+    return {"val": val * 2}
+
+# 1. Top-level await expression
+await fetch_data(10)
+
+# 2. Top-level await assignment
+res = await fetch_data(20)
+res
+
+# 3. Unawaited call to async function (auto-await)
+fetch_data(30)
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 3 {
+		t.Fatalf("expected 3 blocks, got %d", len(res.Blocks))
+	}
+
+	// 1. await fetch_data(10) -> val: 20
+	b0 := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(b0, "{'val': 20}") {
+		t.Errorf("expected top-level await expression result, got: %s", b0)
+	}
+
+	// 2. res -> val: 40
+	b1 := strings.Join(res.Blocks[1].Outputs, "\n")
+	if !strings.Contains(b1, "{'val': 40}") {
+		t.Errorf("expected top-level await assignment result, got: %s", b1)
+	}
+
+	// 3. fetch_data(30) -> auto-await -> val: 60
+	b2 := strings.Join(res.Blocks[2].Outputs, "\n")
+	if !strings.Contains(b2, "{'val': 60}") {
+		t.Errorf("expected auto-awaited coroutine result, got: %s", b2)
+	}
+}
+
+

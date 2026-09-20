@@ -1,12 +1,15 @@
 import ast
+import asyncio
 import contextlib
 import dataclasses
+import inspect
 import io
 import json
 import os
 import pprint
 import sys
 import traceback
+import types
 
 OUTPUT_PREFIXES = ("=>", "➜", "❯", "✕", "…")
 
@@ -353,16 +356,47 @@ def run():
 
     def execute_node(node):
         is_expr = isinstance(node, ast.Expr)
-        code = compile(
-            ast.Expression(body=node.value) if is_expr else ast.Module(body=[node], type_ignores=[]),
-            filename=file_path,
-            mode="eval" if is_expr else "exec",
+        has_async = any(
+            isinstance(sub, (ast.Await, ast.AsyncFor, ast.AsyncWith))
+            for sub in ast.walk(node)
         )
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             try:
-                val = eval(code, scope) if is_expr else exec(code, scope)  # noqa: S102
-                return buf.getvalue(), val, None
+                if has_async:
+                    if is_expr:
+                        assign_node = ast.Assign(
+                            targets=[ast.Name(id="__peek_result__", ctx=ast.Store())],
+                            value=node.value,
+                        )
+                        ast.fix_missing_locations(assign_node)
+                        mod = ast.Module(body=[assign_node], type_ignores=[])
+                    else:
+                        mod = ast.Module(body=[node], type_ignores=[])
+
+                    code = compile(
+                        mod,
+                        filename=file_path,
+                        mode="exec",
+                        flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+                    )
+                    if code.co_flags & inspect.CO_COROUTINE:
+                        func = types.FunctionType(code, scope)
+                        asyncio.run(func())
+                    else:
+                        exec(code, scope)  # noqa: S102
+                    val = scope.pop("__peek_result__", None) if is_expr else None
+                    return buf.getvalue(), val, None
+                else:
+                    code = compile(
+                        ast.Expression(body=node.value) if is_expr else ast.Module(body=[node], type_ignores=[]),
+                        filename=file_path,
+                        mode="eval" if is_expr else "exec",
+                    )
+                    val = eval(code, scope) if is_expr else exec(code, scope)  # noqa: S102
+                    if is_expr and inspect.iscoroutine(val):
+                        val = asyncio.run(val)
+                    return buf.getvalue(), val, None
             except (Exception, SystemExit):  # noqa: BLE001
                 return buf.getvalue(), None, sys.exc_info()
 
@@ -414,9 +448,18 @@ def run():
         error_lines = []
         if exc_info:
             tb = traceback.format_exception(*exc_info)
-            filtered = [
-                l for l in tb if not ("harness.py" in l or ("<string>" in l and "exec(" in l))
-            ]
+            filtered = []
+            skip = False
+            for l in tb:
+                if any(x in l for x in ("harness.py", "asyncio/runners.py", "asyncio/base_events.py")) or (
+                    "<string>" in l and "exec(" in l
+                ):
+                    skip = True
+                    continue
+                if skip and l.startswith("    "):
+                    continue
+                skip = False
+                filtered.append(l)
             error_lines = "".join(filtered).strip().splitlines()
 
         all_std = captured_io.splitlines() if captured_io else []
