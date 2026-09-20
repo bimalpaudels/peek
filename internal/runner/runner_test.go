@@ -400,11 +400,17 @@ func TestForFile(t *testing.T) {
 		}
 	}
 
-	// 2. TypeScript / JavaScript file returns not yet implemented error (ready for bun)
+	// 2. TypeScript / JavaScript file returns BunRunner with prefix //
 	for _, ext := range []string{".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"} {
-		_, err := ForFile("app"+ext, nil)
-		if err == nil || !strings.Contains(err.Error(), "not yet implemented") {
-			t.Errorf("expected 'not yet implemented' error for %s, got %v", ext, err)
+		r, err := ForFile("app"+ext, nil)
+		if err != nil {
+			if !strings.Contains(err.Error(), "requires 'bun'") {
+				t.Fatalf("unexpected error for %s: %v", ext, err)
+			}
+		} else {
+			if r.CommentPrefix() != "//" {
+				t.Errorf("expected comment prefix // for %s, got %q", ext, r.CommentPrefix())
+			}
 		}
 	}
 

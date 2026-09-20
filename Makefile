@@ -20,6 +20,12 @@ build:
 	go build -ldflags="$(LDFLAGS)" -o $(BINARY_NAME) $(CMD_DIR)
 	@echo "✓ Built $(BINARY_NAME) ($$(ls -lh $(BINARY_NAME) | awk '{print $$5}'))"
 
+## Bundle TypeScript harness into standalone harness.js
+bundle-harness:
+	@echo "==> Bundling TypeScript harness..."
+	bun build internal/runner/harness.ts --outfile internal/runner/harness.js --target=bun --minify
+	@echo "✓ Bundled harness.js ($$(ls -lh internal/runner/harness.js | awk '{print $$5}'))"
+
 ## Install binary to $(INSTALL_DIR)
 install: build
 	@echo "==> Installing $(BINARY_NAME) to $(INSTALL_DIR)..."

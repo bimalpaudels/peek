@@ -55,7 +55,18 @@ func ForFile(filePath string, cfg *config.Config) (Runner, error) {
 		}
 		return pyRunner, nil
 	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs":
-		return nil, fmt.Errorf("typescript/javascript runner (bun) is not yet implemented")
+		bunPath := ""
+		if cfg != nil {
+			bunPath = cfg.BunPath
+		}
+		bunRunner, err := NewBunRunner(bunPath)
+		if err != nil {
+			return nil, err
+		}
+		if cfg != nil {
+			bunRunner.MaxStrLen = cfg.MaxStrLen
+		}
+		return bunRunner, nil
 	default:
 		return nil, fmt.Errorf("unsupported file type: %q", ext)
 	}
