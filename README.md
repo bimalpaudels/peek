@@ -34,7 +34,48 @@ curl -fsSL https://raw.githubusercontent.com/bimalpaudels/peep/main/install.sh |
 
 ## Editor Integrations
 
-`peek` works directly from your terminal, but the intended experience is binding it to a single shortcut in your editor (e.g., `Shift + Enter` to run the current line, and `Cmd + Shift + C` to clean the file).
+`peek` works directly from your terminal, but I guess that defeats the whole purpose of it. The intended experience is binding it to a single shortcut in your editor (e.g., `Shift + Enter` to run the current line, and `Cmd + Shift + C` to clean the file).
+
+### VS Code
+
+Add to `.vscode/tasks.json` (or your User Tasks):
+```json
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Peek: Run Current Line",
+      "type": "shell",
+      "command": "peek \"${file}:${lineNumber}\"",
+      "presentation": { "reveal": "never", "close": true }
+    },
+    {
+      "label": "Peek: Clean File",
+      "type": "shell",
+      "command": "peek \"${file}\" --clean",
+      "presentation": { "reveal": "never", "close": true }
+    }
+  ]
+}
+```
+
+Add to `keybindings.json`:
+```json
+[
+  {
+    "key": "shift+enter",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Peek: Run Current Line",
+    "when": "editorTextFocus && editorLangId == python"
+  },
+  {
+    "key": "cmd+shift+c",
+    "command": "workbench.action.tasks.runTask",
+    "args": "Peek: Clean File",
+    "when": "editorTextFocus && editorLangId == python"
+  }
+]
+```
 
 ### Zed
 
@@ -75,62 +116,10 @@ Add to `~/.config/zed/keymap.json`:
 ]
 ```
 
-### Neovim
+### Other Editors
 
-Add to your `init.lua`:
-```lua
--- Evaluate line at cursor (saves file, runs peek, reloads buffer)
-vim.keymap.set('n', '<leader>x', function()
-  local file = vim.fn.expand('%:p')
-  local line = vim.fn.line('.')
-  vim.cmd('write')
-  vim.fn.system(string.format('peek "%s:%d"', file, line))
-  vim.cmd('edit!')
-end, { desc = "Peek: Evaluate line at cursor" })
-
--- Clean scratchpad output comments
-vim.keymap.set('n', '<leader>xc', function()
-  local file = vim.fn.expand('%:p')
-  vim.cmd('write')
-  vim.fn.system(string.format('peek "%s" --clean', file))
-  vim.cmd('edit!')
-end, { desc = "Peek: Clean comments" })
-```
-
-### VS Code
-
-Add to `.vscode/tasks.json` (or User Tasks):
-```json
-{
-  "version": "2.0.0",
-  "tasks": [
-    {
-      "label": "Peek: Run Current Line",
-      "type": "shell",
-      "command": "peek \"${file}:${lineNumber}\"",
-      "presentation": { "reveal": "never", "close": true }
-    },
-    {
-      "label": "Peek: Clean File",
-      "type": "shell",
-      "command": "peek \"${file}\" --clean",
-      "presentation": { "reveal": "never", "close": true }
-    }
-  ]
-}
-```
-
-Add to `keybindings.json`:
-```json
-[
-  {
-    "key": "shift+enter",
-    "command": "workbench.action.tasks.runTask",
-    "args": "Peek: Run Current Line",
-    "when": "editorTextFocus && editorLangId == python"
-  }
-]
-```
+- **Cursor, Windsurf, Antigravity, etc.**: Since these are based on VS Code, the exact same `.vscode/tasks.json` and `keybindings.json` setup above should work with minimal changes. Although that hasn't been tested.
+- **Neovim, Emacs, etc.**: Because `peek` is just a standard CLI taking `file:line` arguments, it can be wired into any editor or terminal environment with custom keymaps or task runners. Configurations for these haven't been officially tested yet—if you have a setup you love, PRs and configs are welcome!
 
 ## Usage
 
