@@ -28,9 +28,21 @@ Under the hood, Python statement parsing, dependency slicing, and execution are 
 
 ---
 
-## Installation & Build
+## Installation
 
-Build and install using `make`:
+### Option 1: Quick Install (`curl | sh`)
+
+Install the latest pre-compiled binary for macOS or Linux directly to `~/.local/bin/peek`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/bimalpaudels/peep/main/install.sh | sh
+```
+
+*(To install to a system directory like `/usr/local/bin`: `curl -fsSL https://raw.githubusercontent.com/bimalpaudels/peep/main/install.sh | INSTALL_DIR=/usr/local/bin sh`)*
+
+---
+
+### Option 2: Build from Source (requires Go 1.22+)
 
 ```bash
 # 1. Build minimal binary (with stripped debug symbols)
