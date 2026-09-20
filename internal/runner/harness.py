@@ -1,10 +1,15 @@
 import ast
+import asyncio
 import contextlib
+import dataclasses
+import inspect
 import io
 import json
 import os
+import pprint
 import sys
 import traceback
+import types
 
 OUTPUT_PREFIXES = ("=>", "➜", "❯", "✕", "…")
 
@@ -38,6 +43,120 @@ def _get_root_name(node):
     if isinstance(curr, ast.Name):
         return curr.id
     return None
+
+
+def _has_top_level_async(node):
+    """Check if node contains top-level async constructs without descending into inner function or class definitions."""
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return False
+    stack = [node]
+    while stack:
+        curr = stack.pop()
+        if isinstance(curr, (ast.Await, ast.AsyncFor, ast.AsyncWith)) or getattr(curr, "is_async", 0):
+            return True
+        for child in ast.iter_child_nodes(curr):
+            if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                stack.append(child)
+    return False
+
+
+def _normalize_obj(obj, depth=0, max_depth=5):
+    if depth > max_depth:
+        return "…"
+
+    # Pydantic v2
+    if hasattr(obj, "model_dump") and callable(obj.model_dump):
+        try:
+            return _normalize_obj(obj.model_dump(), depth + 1, max_depth)
+        except Exception:
+            pass
+
+    # Dataclasses
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        try:
+            return _normalize_obj(dataclasses.asdict(obj), depth + 1, max_depth)
+        except Exception:
+            pass
+
+    if isinstance(obj, dict):
+        return {k: _normalize_obj(v, depth + 1, max_depth) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        converted = [_normalize_obj(item, depth + 1, max_depth) for item in obj]
+        return tuple(converted) if isinstance(obj, tuple) else converted
+    if isinstance(obj, set):
+        return {_normalize_obj(item, depth + 1, max_depth) for item in obj}
+    return obj
+
+
+def _compact_val(v, max_str=140):
+    if v is None or isinstance(v, (int, float, bool)):
+        return repr(v)
+    if isinstance(v, str):
+        if len(v) > max_str:
+            return repr(v[:max_str] + "…")
+        return repr(v)
+    if isinstance(v, dict):
+        if not v:
+            return "{}"
+        if len(v) <= 4:
+            natural = "{" + ", ".join(f"{repr(k)}: {repr(val)}" for k, val in v.items()) + "}"
+            if len(natural) <= 100:
+                return natural
+        if len(v) <= 3:
+            items = [f"{repr(k)}: {_compact_val(val, max_str=40)}" for k, val in v.items()]
+            s = "{" + ", ".join(items) + "}"
+            if len(s) <= 100:
+                return s
+        items = [f"{repr(k)}: {_compact_val(val, max_str=30)}" for k, val in list(v.items())[:2]]
+        items.append(f"… ({len(v)} keys)")
+        return "{" + ", ".join(items) + "}"
+    if isinstance(v, (list, tuple, set)):
+        if not v:
+            return "[]" if isinstance(v, list) else ("()" if isinstance(v, tuple) else "set()")
+        open_b, close_b = ("[", "]") if isinstance(v, list) else (("(", ")") if isinstance(v, tuple) else ("{", "}"))
+        if len(v) <= 5:
+            natural = open_b + ", ".join(repr(x) for x in v) + close_b
+            if len(natural) <= 100:
+                return natural
+        if len(v) <= 2:
+            s = open_b + ", ".join(_compact_val(x, max_str=50) for x in v) + close_b
+            if len(s) <= 100:
+                return s
+        items = [_compact_val(x, max_str=35) for x in list(v)[:2]]
+        items.append(f"… ({len(v)} items)")
+        return open_b + ", ".join(items) + close_b
+    return repr(v)
+
+
+def _format_value(val, max_str=140):
+    if val is None:
+        return None
+
+    normalized = _normalize_obj(val)
+    rep = repr(normalized)
+
+    # 1. If it fits on a single line (<= 80 chars), keep compact representation inline
+    if len(rep) <= 80 and "\n" not in rep:
+        return rep
+
+    # 2. Top-level Dict: strictly 1 line per key
+    if isinstance(normalized, dict):
+        lines = ["{"]
+        for k, v in normalized.items():
+            lines.append(f"  {repr(k)}: {_compact_val(v, max_str=max_str)},")
+        lines.append("}")
+        return "\n".join(lines)
+
+    # 3. Top-level List / Tuple / Set: 1 line per item
+    if isinstance(normalized, (list, tuple, set)):
+        open_b, close_b = ("[", "]") if isinstance(normalized, list) else (("(", ")") if isinstance(normalized, tuple) else ("{", "}"))
+        lines = [open_b]
+        for item in normalized:
+            lines.append(f"  {_compact_val(item, max_str=max_str)},")
+        lines.append(close_b)
+        return "\n".join(lines)
+
+    return rep
 
 
 def _format_outputs(std_lines, result_repr, error_lines, max_lines):
@@ -189,6 +308,7 @@ def run():
     source = payload.get("source") or ""
     target_line = payload.get("target_line")
     max_lines = payload.get("max_lines") or 30
+    max_str_len = payload.get("max_str_len") or 140
 
     if file_path and file_path != "<scratchpad>":
         file_dir = os.path.dirname(os.path.abspath(file_path))
@@ -249,96 +369,154 @@ def run():
         "__builtins__": __builtins__,
     }
 
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+
     def execute_node(node):
         is_expr = isinstance(node, ast.Expr)
-        code = compile(
-            ast.Expression(body=node.value) if is_expr else ast.Module(body=[node], type_ignores=[]),
-            filename=file_path,
-            mode="eval" if is_expr else "exec",
-        )
+        has_async = _has_top_level_async(node)
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
             try:
-                val = eval(code, scope) if is_expr else exec(code, scope)  # noqa: S102
-                return buf.getvalue(), val, None
+                if has_async:
+                    if is_expr:
+                        assign_node = ast.Assign(
+                            targets=[ast.Name(id="__peek_result__", ctx=ast.Store())],
+                            value=node.value,
+                        )
+                        ast.fix_missing_locations(assign_node)
+                        mod = ast.Module(body=[assign_node], type_ignores=[])
+                    else:
+                        mod = ast.Module(body=[node], type_ignores=[])
+
+                    code = compile(
+                        mod,
+                        filename=file_path,
+                        mode="exec",
+                        flags=ast.PyCF_ALLOW_TOP_LEVEL_AWAIT,
+                    )
+                    try:
+                        if code.co_flags & inspect.CO_COROUTINE:
+                            func = types.FunctionType(code, scope)
+                            loop.run_until_complete(func())
+                        else:
+                            exec(code, scope)  # noqa: S102
+                        val = scope.pop("__peek_result__", None) if is_expr else None
+                        return buf.getvalue(), val, None
+                    finally:
+                        if is_expr:
+                            scope.pop("__peek_result__", None)
+                else:
+                    code = compile(
+                        ast.Expression(body=node.value) if is_expr else ast.Module(body=[node], type_ignores=[]),
+                        filename=file_path,
+                        mode="eval" if is_expr else "exec",
+                    )
+                    val = eval(code, scope) if is_expr else exec(code, scope)  # noqa: S102
+                    if is_expr and inspect.isawaitable(val):
+                        val = loop.run_until_complete(val)
+                    return buf.getvalue(), val, None
             except (Exception, SystemExit):  # noqa: BLE001
                 return buf.getvalue(), None, sys.exc_info()
 
-    target_idx = None
-    if target_line is not None:
-        for idx, stmt in enumerate(statements):
-            if stmt["start_line"] <= target_line <= stmt["end_line"]:
-                target_idx = idx
-                break
+    try:
+        target_idx = None
+        if target_line is not None:
+            for idx, stmt in enumerate(statements):
+                if stmt["start_line"] <= target_line <= stmt["end_line"]:
+                    target_idx = idx
+                    break
 
-        # If target_line lands on a blank line or comment: strict no-op
-        if target_idx is None:
-            print(json.dumps({"blocks": []}))
-            return
-
-        # If target statement is an inert declaration (FunctionDef, AsyncFunctionDef, ClassDef): strict no-op
-        target_node = statements[target_idx]["node"]
-        if isinstance(target_node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            print(json.dumps({"blocks": []}))
-            return
-
-    # If target_line is specified, apply program slicing
-    needed_indices = set(range(len(statements)))
-    if target_idx is not None:
-        needed_indices = set(_compute_dependencies(statements, target_idx))
-
-    results = []
-
-    for stmt in statements:
-        if stmt["index"] not in needed_indices:
-            continue
-
-        captured_io, val, exc_info = execute_node(stmt["node"])
-
-        # Silent upstream execution
-        if target_idx is not None and stmt["index"] < target_idx:
-            if exc_info:
-                err_line = traceback.format_exception_only(exc_info[0], exc_info[1])[-1].strip()
-                print(
-                    json.dumps({
-                        "error": f"Upstream statement at line {stmt['start_line']} error: {err_line}",
-                        "blocks": [],
-                    })
-                )
+            # If target_line lands on a blank line or comment: strict no-op
+            if target_idx is None:
+                print(json.dumps({"blocks": []}))
                 return
-            continue
 
-        result_repr = repr(val) if val is not None else None
-        error_lines = []
-        if exc_info:
-            tb = traceback.format_exception(*exc_info)
-            filtered = [
-                l for l in tb if not ("harness.py" in l or ("<string>" in l and "exec(" in l))
-            ]
-            error_lines = "".join(filtered).strip().splitlines()
+            # If target statement is an inert declaration (FunctionDef, AsyncFunctionDef, ClassDef): strict no-op
+            target_node = statements[target_idx]["node"]
+            if isinstance(target_node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                print(json.dumps({"blocks": []}))
+                return
 
-        all_std = captured_io.splitlines() if captured_io else []
-        outputs = _format_outputs(all_std, result_repr, error_lines, max_lines)
+        # If target_line is specified, apply program slicing
+        needed_indices = set(range(len(statements)))
+        if target_idx is not None:
+            needed_indices = set(_compute_dependencies(statements, target_idx))
 
-        orig_end = getattr(stmt["node"], "end_lineno", None) or stmt["start_line"]
-        has_existing_outputs = stmt["end_line"] > orig_end or any(
-            _has_output_comment(source_lines[ln - 1])
-            for ln in range(stmt["start_line"], stmt["end_line"] + 1)
-            if ln - 1 < len(source_lines)
-        )
-        if target_idx is not None or outputs or has_existing_outputs:
-            results.append({
-                "start_line": stmt["start_line"],
-                "end_line": stmt["end_line"],
-                "outputs": outputs,
-            })
-            if target_idx is not None:
+        results = []
+
+        for stmt in statements:
+            if stmt["index"] not in needed_indices:
+                continue
+
+            captured_io, val, exc_info = execute_node(stmt["node"])
+
+            # Silent upstream execution
+            if target_idx is not None and stmt["index"] < target_idx:
+                if exc_info:
+                    err_line = traceback.format_exception_only(exc_info[0], exc_info[1])[-1].strip()
+                    print(
+                        json.dumps({
+                            "error": f"Upstream statement at line {stmt['start_line']} error: {err_line}",
+                            "blocks": [],
+                        })
+                    )
+                    return
+                continue
+
+            result_repr = _format_value(val, max_str=max_str_len)
+            error_lines = []
+            if exc_info:
+                tb = traceback.format_exception(*exc_info)
+                filtered = []
+                skip = False
+                for l in tb:
+                    if any(x in l for x in ("harness.py", "asyncio/runners.py", "asyncio/base_events.py")) or (
+                        "<string>" in l and "exec(" in l
+                    ):
+                        skip = True
+                        continue
+                    if skip and l.startswith("    "):
+                        continue
+                    skip = False
+                    filtered.append(l)
+                error_lines = "".join(filtered).strip().splitlines()
+
+            all_std = captured_io.splitlines() if captured_io else []
+            outputs = _format_outputs(all_std, result_repr, error_lines, max_lines)
+
+            orig_end = getattr(stmt["node"], "end_lineno", None) or stmt["start_line"]
+            has_existing_outputs = stmt["end_line"] > orig_end or any(
+                _has_output_comment(source_lines[ln - 1])
+                for ln in range(stmt["start_line"], stmt["end_line"] + 1)
+                if ln - 1 < len(source_lines)
+            )
+            if target_idx is not None or outputs or has_existing_outputs:
+                results.append({
+                    "start_line": stmt["start_line"],
+                    "end_line": stmt["end_line"],
+                    "outputs": outputs,
+                })
+                if target_idx is not None:
+                    break
+
+            if error_lines:
                 break
 
-        if error_lines:
-            break
-
-    print(json.dumps({"blocks": results}))
+        print(json.dumps({"blocks": results}))
+    finally:
+        try:
+            pending = asyncio.all_tasks(loop)
+            for t in pending:
+                t.cancel()
+            if pending:
+                loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            loop.run_until_complete(loop.shutdown_asyncgens())
+        except Exception:
+            pass
+        finally:
+            loop.close()
+            asyncio.set_event_loop(None)
 
 
 if __name__ == "__main__":

@@ -15,8 +15,6 @@ dist/
 .peek_tmp_*
 .sc_tmp_*
 
-# Local examples
-examples/
 
 # Python & virtual environment artifacts
 __pycache__/

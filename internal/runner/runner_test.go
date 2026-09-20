@@ -200,3 +200,191 @@ func TestPythonRunner_CleanStaleInlineComment(t *testing.T) {
 		t.Errorf("expected 0 outputs for assignment, got %v", res.Blocks[0].Outputs)
 	}
 }
+
+func TestPythonRunner_PrettyPrint(t *testing.T) {
+	source := `from dataclasses import dataclass
+
+@dataclass
+class User:
+    id: int
+    name: str
+
+class FakeModel:
+    def model_dump(self):
+        return {"id": 1, "roles": ["admin", "editor"], "meta": {"active": True, "score": 99.5}}
+
+u = User(1, 'Alice')
+u
+
+m = FakeModel()
+m
+
+small = {"a": 1}
+small
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 3 {
+		t.Fatalf("expected 3 blocks, got %d", len(res.Blocks))
+	}
+
+	// 1. Dataclass: formatted as dict
+	uOut := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(uOut, "{'id': 1, 'name': 'Alice'}") {
+		t.Errorf("expected dataclass to format as dict, got: %s", uOut)
+	}
+
+	// 2. FakeModel (Pydantic v2 duck-typed): multi-line pretty-printed
+	mOut := res.Blocks[1].Outputs
+	if len(mOut) <= 1 {
+		t.Errorf("expected multi-line pretty-printed output for complex model, got %d lines: %v", len(mOut), mOut)
+	}
+
+	// 3. Small dict: single-line compact
+	sOut := res.Blocks[2].Outputs
+	if len(sOut) != 1 || !strings.Contains(sOut[0], "{'a': 1}") {
+		t.Errorf("expected small dict to remain compact single-line, got: %v", sOut)
+	}
+}
+
+func TestPythonRunner_AsyncExecution(t *testing.T) {
+	source := `import asyncio
+
+async def fetch_data(val):
+    await asyncio.sleep(0.001)
+    return {"val": val * 2}
+
+# 1. Top-level await expression
+await fetch_data(10)
+
+# 2. Top-level await assignment
+res = await fetch_data(20)
+res
+
+# 3. Unawaited call to async function (auto-await)
+fetch_data(30)
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 3 {
+		t.Fatalf("expected 3 blocks, got %d", len(res.Blocks))
+	}
+
+	// 1. await fetch_data(10) -> val: 20
+	b0 := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(b0, "{'val': 20}") {
+		t.Errorf("expected top-level await expression result, got: %s", b0)
+	}
+
+	// 2. res -> val: 40
+	b1 := strings.Join(res.Blocks[1].Outputs, "\n")
+	if !strings.Contains(b1, "{'val': 40}") {
+		t.Errorf("expected top-level await assignment result, got: %s", b1)
+	}
+
+	// 3. fetch_data(30) -> auto-await -> val: 60
+	b2 := strings.Join(res.Blocks[2].Outputs, "\n")
+	if !strings.Contains(b2, "{'val': 60}") {
+		t.Errorf("expected auto-awaited coroutine result, got: %s", b2)
+	}
+}
+
+func TestPythonRunner_AsyncStateAcrossStatements(t *testing.T) {
+	source := `import asyncio
+
+queue = asyncio.Queue()
+await queue.put("shared_item")
+item = await queue.get()
+item
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "'shared_item'") {
+		t.Errorf("expected shared queue item, got: %s", out)
+	}
+}
+
+func TestPythonRunner_AsyncScopeHygiene(t *testing.T) {
+	source := `import asyncio
+
+async def fail():
+    raise ValueError("intentional error")
+
+try:
+    await fail()
+except Exception:
+    pass
+
+"__peek_result__" in globals()
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "False") {
+		t.Errorf("expected __peek_result__ to not leak into globals, got: %s", out)
+	}
+}
+
+func TestPythonRunner_AsyncNestedInSync(t *testing.T) {
+	source := `def make_handler():
+    async def inner():
+        return 99
+    return inner
+
+h = make_handler()
+h()
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "99") {
+		t.Errorf("expected auto-awaited result from inner coroutine, got: %s", out)
+	}
+}
+
+func TestPythonRunner_AsyncComprehension(t *testing.T) {
+	source := `import asyncio
+
+async def agen():
+    for i in range(3):
+        await asyncio.sleep(0.001)
+        yield i * 5
+
+[x async for x in agen()]
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "[0, 5, 10]") {
+		t.Errorf("expected async comprehension output, got: %s", out)
+	}
+}
+
+func TestPythonRunner_AsyncGatherAutoAwait(t *testing.T) {
+	source := `import asyncio
+
+async def fetch(x):
+    await asyncio.sleep(0.001)
+    return x * 10
+
+asyncio.gather(fetch(1), fetch(2))
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 1 {
+		t.Fatalf("expected 1 output block, got %d", len(res.Blocks))
+	}
+	out := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(out, "[10, 20]") {
+		t.Errorf("expected auto-awaited asyncio.gather output, got: %s", out)
+	}
+}
+
+
+

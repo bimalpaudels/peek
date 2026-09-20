@@ -26,6 +26,7 @@ install: build
 	@mkdir -p $(INSTALL_DIR)
 	@install -m 755 $(BINARY_NAME) $(INSTALL_DIR)/$(BINARY_NAME)
 	@echo "✓ Successfully installed $(BINARY_NAME) to $(INSTALL_DIR)/$(BINARY_NAME)"
+	@./$(BINARY_NAME) --config >/dev/null 2>&1 || true
 	@if ! echo "$$PATH" | grep -q "$(INSTALL_DIR)"; then \
 		echo "⚠ Warning: $(INSTALL_DIR) does not appear to be in your \$$PATH"; \
 	fi

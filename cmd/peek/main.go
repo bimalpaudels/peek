@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"peek/internal/config"
 	"peek/internal/parser"
 	"peek/internal/runner"
 )
@@ -28,14 +29,20 @@ Options:
   --clean                      Remove all scratchpad output comments
   --max-lines int              Max output lines per statement (default 30)
   --timeout int                Execution timeout in seconds (default 10)
+  --config                     Print config file path (auto-creates if missing)
   -v, --version                Show version information
   -h, --help                   Show this help message
 `, Version)
 }
 
-func parseArgs(args []string) (filePath string, lineNo *int, clean bool, maxLines int, timeout int, err error) {
-	maxLines = 30
-	timeout = 10
+func parseArgs(args []string, userCfg ...*config.Config) (filePath string, lineNo *int, clean bool, maxLines int, timeout int, err error) {
+	cfg := config.DefaultConfig()
+	if len(userCfg) > 0 && userCfg[0] != nil {
+		cfg = userCfg[0]
+	}
+
+	maxLines = cfg.MaxLines
+	timeout = cfg.Timeout
 	var positional []string
 
 	for i := 0; i < len(args); i++ {
@@ -45,6 +52,10 @@ func parseArgs(args []string) (filePath string, lineNo *int, clean bool, maxLine
 			os.Exit(0)
 		case args[i] == "-v" || args[i] == "--version":
 			fmt.Printf("peek v%s\n", Version)
+			os.Exit(0)
+		case args[i] == "--config":
+			path, _ := config.EnsureConfigFile()
+			fmt.Println(path)
 			os.Exit(0)
 		case args[i] == "--clean":
 			clean = true
@@ -98,7 +109,9 @@ func parseArgs(args []string) (filePath string, lineNo *int, clean bool, maxLine
 }
 
 func main() {
-	filePath, lineNo, clean, maxLines, timeout, err := parseArgs(os.Args[1:])
+	cfg := config.Load()
+
+	filePath, lineNo, clean, maxLines, timeout, err := parseArgs(os.Args[1:], cfg)
 	if err != nil {
 		printUsage()
 		os.Exit(1)
@@ -130,11 +143,13 @@ func main() {
 		return
 	}
 
-	pyRunner, err := runner.NewPythonRunner()
+	pyRunner, err := runner.NewPythonRunner(cfg.UVPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "peek error: %v\n", err)
 		os.Exit(1)
 	}
+	pyRunner.MaxStrLen = cfg.MaxStrLen
+	pyRunner.PythonVersion = cfg.PythonVersion
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
 	defer cancel()
@@ -159,7 +174,7 @@ func main() {
 		return
 	}
 
-	updated, err := parser.ApplyBlockOutputs(content, result.Blocks)
+	updated, err := parser.ApplyBlockOutputs(content, result.Blocks, cfg.LineWidth)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "peek error updating output: %v\n", err)
 		os.Exit(1)

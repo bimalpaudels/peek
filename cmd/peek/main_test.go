@@ -2,6 +2,8 @@ package main
 
 import (
 	"testing"
+
+	"peek/internal/config"
 )
 
 func TestParseArgs(t *testing.T) {
@@ -111,3 +113,45 @@ func TestParseArgs(t *testing.T) {
 func intPtr(i int) *int {
 	return &i
 }
+
+func TestParseArgs_WithCustomConfig(t *testing.T) {
+	customCfg, err := parseCustomConfig(`
+max_lines = 45
+timeout = 20
+`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// 1. Should use custom config defaults when no CLI flags given
+	file, _, _, maxLines, timeout, err := parseArgs([]string{"demo.py"}, customCfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if file != "demo.py" {
+		t.Errorf("expected demo.py, got %s", file)
+	}
+	if maxLines != 45 {
+		t.Errorf("expected maxLines=45 from config, got %d", maxLines)
+	}
+	if timeout != 20 {
+		t.Errorf("expected timeout=20 from config, got %d", timeout)
+	}
+
+	// 2. CLI flags should override config
+	_, _, _, maxLines2, timeout2, err := parseArgs([]string{"demo.py", "--max-lines", "99", "--timeout", "3"}, customCfg)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if maxLines2 != 99 {
+		t.Errorf("expected CLI override maxLines=99, got %d", maxLines2)
+	}
+	if timeout2 != 3 {
+		t.Errorf("expected CLI override timeout=3, got %d", timeout2)
+	}
+}
+
+func parseCustomConfig(s string) (*config.Config, error) {
+	return config.Parse(s)
+}
+
