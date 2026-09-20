@@ -4,209 +4,37 @@
 
 `peek` runs Python code directly inside your `.py` files and writes the output right next to your code as comments (`x  # ➜ 10`).
 
-No notebooks. No copy-pasting into terminal REPLs. Just write standard Python, evaluate a line or the whole file, see what happened right there, and wipe the comments clean whenever you're done.
-
-Under the hood, it's a single Go binary that uses Python's native AST and `uv` to figure out dependencies, run only what's needed, and get out of your way.
-
----
-
-## Why was this made?
-
-I was practicing some simple algorithms with IPython, but I kept making stupid mistakes in a nested loop. Correcting them became a chore—re-running snippets, copying lines back and forth, or dealing with stale state in the terminal.
-
-That's when I went looking for an "in-file" REPL. But I definitely wasn't looking for Jupyter notebooks or anything that heavy. That's where the idea came from.
-
-The plan is to sit right between quick terminal REPLs and full-blown notebook engines. Fast feedback right in your editor, zero extra ceremony.
-
----
-
-## Who is this for?
-
-- **Algorithm practice & LeetCode**: Prototype your logic line-by-line, inspect intermediate lists or dicts inline, catch off-by-one errors immediately, and strip all outputs with one keybind before submitting.
-- **Backend & Data scripts**: Quickly iterate on data transformations, regex, SQL/ORM queries, Pydantic models, or async pipelines without booting a server or creating throwaway test files.
-- **Scratching an itch**: When you just want to know *"what does this snippet actually evaluate to right now?"* without leaving your editor.
-
----
-
-## Who is this NOT for?
-
-- If you work on large datasets and are looking for a Jupyter alternative with graphs and tables, this is not for you.
-- This is not a REPL replacement either. IPython or standard terminal shells remain better for quick interactive command-line experimentation.
-- `peek` is an interactive scratchpad for developer flow, not an automated test runner to replace `pytest` in CI pipelines.
-
----
-
-## Why is it built like this?
-
-- **Single compiled binary (Go)**: Instant startup, zero dependencies to install or maintain `peek` itself. Plus, building it in Go leaves plenty of room down the road to orchestrate runners for other languages besides Python.
-- **Smart dependency slicing**: If you run line 40, `peek` uses Python's native `ast` to figure out and run only what line 40 actually depends on. Formatter changes (`ruff`, `black`) or empty lines won't throw it off.
-- **Stateless (no zombie kernels)**: Runs in-memory and exits cleanly. No lingering background daemons, no stale variables mutating between runs, and no mysterious socket files left in `/tmp`.
-- **Inline & clean output**: Expression values sit right at the end of the line (`# ➜ 10`). Printed stdout (`# ❯`) and errors (`# ✕`) sit neatly underneath.
-- **One-command cleanup**: Run `peek file.py --clean` and every generated comment disappears. Your code stays clean and git-ready.
-- **Editor agnostic**: It's just a CLI tool. You don't need a dedicated plugin ecosystem—just map a keybinding in Zed, Neovim, or VS Code to run the command.
+No notebooks. No copy-pasting back and forth into terminal REPLs. Just write standard Python, evaluate a line or the whole file, see what happened right there, and wipe the comments clean whenever you're done.
 
 ---
 
 ## Prerequisites
 
-- **uv** (Required runtime for fast, stateless Python execution):
-  ```bash
-  # Install uv (macOS / Linux)
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  # Or via Homebrew
-  brew install uv
-  ```
-- **Go 1.22+** (Only needed if building from source)
+`peek` uses [`uv`](https://github.com/astral-sh/uv) to execute Python slices blazingly fast with zero environment headaches:
 
----
+```bash
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Or via Homebrew
+brew install uv
+```
 
 ## Installation
 
-### Option 1: Quick Install (`curl | sh`)
-
-Install the latest pre-compiled binary for macOS or Linux directly to `~/.local/bin/peek`:
+Install the pre-compiled binary for macOS or Linux directly to `~/.local/bin/peek`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/bimalpaudels/peep/main/install.sh | sh
 ```
 
-*(To install to a system directory like `/usr/local/bin`: `curl -fsSL https://raw.githubusercontent.com/bimalpaudels/peep/main/install.sh | INSTALL_DIR=/usr/local/bin sh`)*
+*(To install to a system directory like `/usr/local/bin`, run `curl -fsSL https://raw.githubusercontent.com/bimalpaudels/peep/main/install.sh | INSTALL_DIR=/usr/local/bin sh`)*
 
----
+> Building from source? See the [Development](#development) section below.
 
-### Option 2: Build from Source (requires Go 1.22+)
+## Editor Integrations
 
-```bash
-# 1. Build minimal binary (with stripped debug symbols)
-make build
-
-# 2. Install to ~/.local/bin (or specify INSTALL_DIR=/usr/local/bin)
-make install
-
-# 3. Update (rebuild + reinstall)
-make update
-
-# 4. Uninstall from system
-make uninstall
-```
-
-Or build manually:
-```bash
-go build -ldflags="-s -w" -o peek ./cmd/peek
-```
-
----
-
-## Usage
-
-```bash
-# 1. Evaluate statement/block at cursor line 21
-peek solution.py:21
-
-# Or with line number as separate argument
-peek solution.py 21
-
-# 2. Evaluate all statements in file sequentially
-peek solution.py
-
-# 3. Strip all scratchpad output comments
-peek solution.py --clean
-
-# 4. Custom output line limit (default 30) or timeout (default 10s)
-peek solution.py:21 --max-lines 50 --timeout 5
-```
-
----
-
-## Example
-
-Say you're working in `solution.py`:
-
-```python
-# Setup
-x = [1, 2, 3, 4]
-y = [i * 10 for i in x]
-y
-
-# Algorithm
-def two_sum(nums, target):
-    seen = {}
-    for i, n in enumerate(nums):
-        diff = target - n
-        if diff in seen:
-            return [seen[diff], i]
-        seen[n] = i
-
-two_sum([2, 7, 11, 15], 9)
-```
-
-Run `peek solution.py`:
-
-```bash
-peek solution.py
-```
-
-Your file updates right in place:
-
-```python
-# Setup
-x = [1, 2, 3, 4]
-y = [i * 10 for i in x]
-y  # ➜ [10, 20, 30, 40]
-
-# Algorithm
-def two_sum(nums, target):
-    seen = {}
-    for i, n in enumerate(nums):
-        diff = target - n
-        if diff in seen:
-            return [seen[diff], i]
-        seen[n] = i
-
-two_sum([2, 7, 11, 15], 9)  # ➜ [0, 1]
-```
-
-If a statement prints or raises an exception, `peek` drops it right underneath:
-
-```python
-print(f"Total: {sum(y)}")
-# ❯ Total: 100
-
-1 / 0
-# ✕ ZeroDivisionError: division by zero
-```
-
-When you're done tinkering and ready to commit or paste into LeetCode:
-
-```bash
-peek solution.py --clean
-```
-
-All scratchpad comments vanish. Clean code, no residue.
-
----
-
-## Async Support (Top-Level Await)
-
-You don't need `asyncio.run(...)` or wrapper boilerplate. Async works right out of the box:
-
-- **Top-level `await`**: Await coroutines directly:
-  ```python
-  res = await client.get("/items")
-  res.json()  # ➜ {"items": [1, 2, 3]}
-  ```
-- **Auto-awaiting**: If an expression returns a coroutine, task, or `asyncio.gather(...)`, `peek` awaits it for you automatically:
-  ```python
-  asyncio.gather(fetch(1), fetch(2))  # ➜ [10, 20]
-  ```
-- **Shared event loop**: A single event loop stays alive across the run, so things like `asyncio.Queue`, locks, or persistent client sessions won't break across lines.
-- **A quick note on side effects**: Dependency slicing tracks variables. If you have a standalone setup call with no inputs/outputs (like `await init_db()`), assign it to a throwaway variable (`_ = await init_db()`) or evaluate the entire file (`peek file.py`).
-
----
-
-## Editor Integration
-
-`peek` works directly from your terminal, but the intended experience is binding it to a single shortcut in your editor (e.g. `Shift + Enter` to run the current line, and `Cmd + Shift + C` to clean the file).
+`peek` works directly from your terminal, but the intended experience is binding it to a single shortcut in your editor (e.g., `Shift + Enter` to run the current line, and `Cmd + Shift + C` to clean the file).
 
 ### Zed
 
@@ -247,8 +75,6 @@ Add to `~/.config/zed/keymap.json`:
 ]
 ```
 
----
-
 ### Neovim
 
 Add to your `init.lua`:
@@ -270,8 +96,6 @@ vim.keymap.set('n', '<leader>xc', function()
   vim.cmd('edit!')
 end, { desc = "Peek: Clean comments" })
 ```
-
----
 
 ### VS Code
 
@@ -308,14 +132,124 @@ Add to `keybindings.json`:
 ]
 ```
 
----
+## Usage
 
-## Project Structure
+```bash
+# Evaluate statement/block at cursor line 21
+peek solution.py:21
+
+# Evaluate all statements in the file sequentially
+peek solution.py
+
+# Strip all scratchpad output comments
+peek solution.py --clean
+
+# Custom output line limit (default 30) or timeout (default 10s)
+peek solution.py:21 --max-lines 50 --timeout 5
+```
+
+## Examples
+
+### Inline Output & Cleanup
+
+```python
+# Before
+nums = [1, 2, 3, 4]
+squared = [x**2 for x in nums]
+squared
+print("Done!")
+
+# Run: peek solution.py
+nums = [1, 2, 3, 4]
+squared = [x**2 for x in nums]
+squared  # ➜ [1, 4, 9, 16]
+print("Done!")
+# ❯ Done!
+```
+
+Run `peek solution.py --clean` and all comments vanish instantly.
+
+### Dependency Slicing
+
+```python
+# Expensive setup (will be skipped!)
+data = load_large_dataset()
+
+# Target line 5 with `peek solution.py:5`
+y = 10 * 42
+y  # ➜ 420 (runs instantly; data loading is never executed)
+```
+
+> 💡 **Looking for more?** See the [`examples/`](./examples) directory for complete scripts:
+> - [`01_basics.py`](./examples/01_basics.py): Expressions, stdout, errors, dict & list formatting
+> - [`02_slicing.py`](./examples/02_slicing.py): Dependency tree-shaking & object mutations
+> - [`03_async_showcase.py`](./examples/03_async_showcase.py): Top-level await, auto-await, shared event loops
+> - [`04_errors_and_tracebacks.py`](./examples/04_errors_and_tracebacks.py): Traceback snippets & exception handling
+> - [`05_pipeline.py`](./examples/05_pipeline.py): Multi-stage data pipelines
+> - [`06_algorithms_and_tricks.py`](./examples/06_algorithms_and_tricks.py): Dataclasses, algorithms & comprehensions
+
+## Development
+
+### Project Structure
 
 ```text
 ├── cmd/peek/           # CLI entry point, flag parsing, command routing
 ├── internal/
-│   ├── parser/         # Output comment detection, formatting, and atomic file I/O
+│   ├── config/         # CLI flag and execution configurations
+│   ├── parser/         # Comment detection, formatting, atomic file I/O
 │   └── runner/         # Execution engine (uv dispatch, embedded harness.py)
+├── examples/           # Ready-to-run showcase scripts
 └── Makefile            # Build, test, and install targets
 ```
+
+### Building from Source (Go 1.22+)
+
+```bash
+# Build binary
+make build
+
+# Install to ~/.local/bin (or specify INSTALL_DIR=/usr/local/bin)
+make install
+
+# Run tests
+go test ./...
+```
+
+## Features
+
+### What's there
+- **Inline values & clean blocks**: Expressions sit inline (`# ➜ 10`), while stdout (`# ❯`) and errors (`# ✕`) sit neatly below.
+- **Smart dependency slicing**: Uses Python's native `ast` to run only what your target line actually needs. Formatter tweaks (`ruff`, `black`) or empty lines won't break it.
+- **Stateless execution (no zombie kernels)**: Runs in-memory and exits cleanly. No background daemons, no stale variables mutating between runs, no `/tmp` sockets.
+- **First-class async support**:
+  - Top-level `await` without wrapper functions (`res = await client.get(...)`).
+  - Auto-awaiting for coroutines, tasks, and `asyncio.gather(...)`.
+  - Shared event loop across the file execution for queues, locks, and persistent sessions.
+- **Instant cleanup**: Run `peek file.py --clean` and every comment disappears.
+- **Editor agnostic**: Works anywhere you can map a keybinding to a shell command.
+
+### What's coming
+- **Multi-language runners**: Built in Go so the core orchestrator can support runners for JavaScript/TypeScript, Go, Rust, and others down the road.
+- **Watch mode**: Auto-evaluate targeted statements or files on file save.
+- **Custom formatters**: Configurable formatting for complex objects, dataclasses, and mini table previews.
+
+## Why was this made?
+
+I was practicing some simple algorithms with IPython, but I kept making stupid mistakes in a nested loop. Correcting them became a chore—re-running snippets, copying lines back and forth, or dealing with stale state in the terminal.
+
+That's when I went looking for an "in-file" REPL. But I definitely wasn't looking for Jupyter notebooks or anything that heavy. That's where the idea came from.
+
+The plan is to sit right between quick terminal REPLs and full-blown notebook engines: fast feedback right inside your editor with zero extra ceremony.
+
+## Who is this for?
+
+- **Algorithm practice & LeetCode**: Prototype your logic line-by-line, inspect intermediate lists or dicts inline, catch off-by-one errors immediately, and strip all outputs with one keybind before submitting.
+- **Backend & Data scripts**: Quickly iterate on data transformations, regex, SQL/ORM queries, Pydantic models, or async pipelines without booting a server or creating throwaway test files.
+- **Scratching an itch**: When you just want to know *"what does this snippet actually evaluate to right now?"* without leaving your editor.
+
+## Limitations
+
+- **Not a Jupyter alternative**: If you work on massive datasets and need interactive charts, scatter plots, or 100-column dataframes, stick with Jupyter. `peek` is for writing and sanity-checking code, not authoring data science reports.
+- **Not a REPL replacement**: IPython or standard terminal shells remain better for quick, throwaway 1-liners where you don't even want to touch a file.
+- **Not a test runner**: `peek` is a scratchpad to keep you in the flow while coding. It's not an assertion framework to replace `pytest` in your CI pipeline.
+- **Unassigned side effects**: Dependency slicing follows AST data flow. Standalone setup calls with no inputs or outputs (like a void `await init_db()`) won't be picked up when targeting a specific downstream line unless you assign it (`_ = await init_db()`) or run the whole file (`peek file.py`).
