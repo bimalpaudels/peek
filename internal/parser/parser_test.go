@@ -221,3 +221,36 @@ z = 30`
 		t.Errorf("expected stale comments wiped:\nGOT:\n%s\nWANT:\n%s", updated, expected)
 	}
 }
+
+func TestApplyBlockOutputs_PrettyPrintedMultiline(t *testing.T) {
+	code := `user = get_user()
+user`
+
+	results := []runner.BlockResult{
+		{
+			StartLine: 2,
+			EndLine:   2,
+			Outputs: []string{
+				"➜ {'id': 1,",
+				"➜  'name': 'Alice',",
+				"➜  'roles': ['admin']}",
+			},
+		},
+	}
+
+	updated, err := ApplyBlockOutputs(code, results)
+	if err != nil {
+		t.Fatalf("ApplyBlockOutputs failed: %v", err)
+	}
+
+	expected := `user = get_user()
+user
+# ➜ {'id': 1,
+# ➜  'name': 'Alice',
+# ➜  'roles': ['admin']}`
+
+	if updated != expected {
+		t.Errorf("expected multi-line pretty print comment block:\nGOT:\n%s\nWANT:\n%s", updated, expected)
+	}
+}
+

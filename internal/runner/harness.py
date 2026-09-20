@@ -1,8 +1,10 @@
 import ast
 import contextlib
+import dataclasses
 import io
 import json
 import os
+import pprint
 import sys
 import traceback
 
@@ -38,6 +40,55 @@ def _get_root_name(node):
     if isinstance(curr, ast.Name):
         return curr.id
     return None
+
+
+def _normalize_obj(obj, depth=0, max_depth=5):
+    if depth > max_depth:
+        return "…"
+
+    # Pydantic v2
+    if hasattr(obj, "model_dump") and callable(obj.model_dump):
+        try:
+            return _normalize_obj(obj.model_dump(), depth + 1, max_depth)
+        except Exception:
+            pass
+
+    # Dataclasses
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        try:
+            return _normalize_obj(dataclasses.asdict(obj), depth + 1, max_depth)
+        except Exception:
+            pass
+
+    if isinstance(obj, dict):
+        return {k: _normalize_obj(v, depth + 1, max_depth) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        converted = [_normalize_obj(item, depth + 1, max_depth) for item in obj]
+        return tuple(converted) if isinstance(obj, tuple) else converted
+    if isinstance(obj, set):
+        return {_normalize_obj(item, depth + 1, max_depth) for item in obj}
+    return obj
+
+
+def _format_value(val):
+    if val is None:
+        return None
+
+    normalized = _normalize_obj(val)
+    rep = repr(normalized)
+
+    # If it fits within 60 chars on a single line, keep compact representation
+    if len(rep) <= 60 and "\n" not in rep:
+        return rep
+
+    # Pretty-print multi-line for complex or large structures
+    if isinstance(normalized, (dict, list, tuple, set)):
+        try:
+            return pprint.pformat(normalized, sort_dicts=False, width=60, compact=False)
+        except Exception:
+            return rep
+
+    return rep
 
 
 def _format_outputs(std_lines, result_repr, error_lines, max_lines):
@@ -308,7 +359,7 @@ def run():
                 return
             continue
 
-        result_repr = repr(val) if val is not None else None
+        result_repr = _format_value(val)
         error_lines = []
         if exc_info:
             tb = traceback.format_exception(*exc_info)

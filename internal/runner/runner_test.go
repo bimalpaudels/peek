@@ -200,3 +200,49 @@ func TestPythonRunner_CleanStaleInlineComment(t *testing.T) {
 		t.Errorf("expected 0 outputs for assignment, got %v", res.Blocks[0].Outputs)
 	}
 }
+
+func TestPythonRunner_PrettyPrint(t *testing.T) {
+	source := `from dataclasses import dataclass
+
+@dataclass
+class User:
+    id: int
+    name: str
+
+class FakeModel:
+    def model_dump(self):
+        return {"id": 1, "roles": ["admin", "editor"], "meta": {"active": True, "score": 99.5}}
+
+u = User(1, 'Alice')
+u
+
+m = FakeModel()
+m
+
+small = {"a": 1}
+small
+`
+	res := runTest(t, source, nil)
+	if len(res.Blocks) != 3 {
+		t.Fatalf("expected 3 blocks, got %d", len(res.Blocks))
+	}
+
+	// 1. Dataclass: formatted as dict
+	uOut := strings.Join(res.Blocks[0].Outputs, "\n")
+	if !strings.Contains(uOut, "{'id': 1, 'name': 'Alice'}") {
+		t.Errorf("expected dataclass to format as dict, got: %s", uOut)
+	}
+
+	// 2. FakeModel (Pydantic v2 duck-typed): multi-line pretty-printed
+	mOut := res.Blocks[1].Outputs
+	if len(mOut) <= 1 {
+		t.Errorf("expected multi-line pretty-printed output for complex model, got %d lines: %v", len(mOut), mOut)
+	}
+
+	// 3. Small dict: single-line compact
+	sOut := res.Blocks[2].Outputs
+	if len(sOut) != 1 || !strings.Contains(sOut[0], "{'a': 1}") {
+		t.Errorf("expected small dict to remain compact single-line, got: %v", sOut)
+	}
+}
+
