@@ -10,6 +10,10 @@ import (
 )
 
 func runBunTest(t *testing.T, source string, targetLine *int) *ExecutionResult {
+	return runBunTestWithFile(t, "test.ts", source, targetLine)
+}
+
+func runBunTestWithFile(t *testing.T, filename, source string, targetLine *int) *ExecutionResult {
 	t.Helper()
 	r, err := NewBunRunner()
 	if err != nil {
@@ -19,7 +23,7 @@ func runBunTest(t *testing.T, source string, targetLine *int) *ExecutionResult {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	res, err := r.Execute(ctx, "test.ts", source, targetLine, 30)
+	res, err := r.Execute(ctx, filename, source, targetLine, 30)
 	if err != nil {
 		if strings.Contains(err.Error(), "operation not permitted") || strings.Contains(err.Error(), "permission denied") {
 			t.Skipf("skipping test due to environment execution restriction: %v", err)
@@ -290,5 +294,22 @@ await compute();
 	res7 := runBunTest(t, source, &targetLine7)
 	if len(res7.Blocks) != 1 || !strings.Contains(strings.Join(res7.Blocks[0].Outputs, "\n"), "➜ 42") {
 		t.Errorf("expected '➜ 42', got %v", res7.Blocks)
+	}
+}
+
+func TestBunRunner_JsxSlicing(t *testing.T) {
+	source := `throw new Error("unrelated error");
+
+function UserBadge(props: { name: string }) {
+    return <div className="badge">{props.name}</div>;
+}
+
+const element = <UserBadge name="Alice" />;
+element.props.name;
+`
+	targetLine := 8
+	res := runBunTestWithFile(t, "test.tsx", source, &targetLine)
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), `➜ "Alice"`) {
+		t.Errorf("expected '➜ \"Alice\"' via JSX dependency slicing, got %v", res.Blocks)
 	}
 }

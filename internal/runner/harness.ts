@@ -68,6 +68,60 @@ function getRootName(node: any): string | null {
   return null;
 }
 
+function getJsxRootName(node: any): string | null {
+  let curr = node;
+  while (curr && curr.type === "JSXMemberExpression") {
+    curr = curr.object;
+  }
+  if (curr && curr.type === "JSXIdentifier") {
+    return curr.name;
+  }
+  return null;
+}
+
+function extractJsxPragmas(source: string): { jsxPragma: string | null; jsxFragPragma: string | null } {
+  let jsxPragma: string | null = null;
+  let jsxFragPragma: string | null = null;
+  const jsxMatch = source.match(/@jsx\s+([A-Za-z0-9_$.]+)/);
+  if (jsxMatch) {
+    jsxPragma = jsxMatch[1].split(".")[0];
+  }
+  const fragMatch = source.match(/@jsxFrag\s+([A-Za-z0-9_$.]+)/);
+  if (fragMatch) {
+    jsxFragPragma = fragMatch[1].split(".")[0];
+  }
+  return { jsxPragma, jsxFragPragma };
+}
+
+function checkJsx(
+  sub: any,
+  reads: Set<string>,
+  localNames: Set<string> | null,
+  jsxPragma: string | null,
+  jsxFragPragma: string | null
+) {
+  if (sub.type === "JSXOpeningElement") {
+    if (jsxPragma) {
+      reads.add(jsxPragma);
+    }
+    let tagRoot: string | null = null;
+    if (sub.name.type === "JSXIdentifier") {
+      if (/^[A-Z]/.test(sub.name.name)) {
+        tagRoot = sub.name.name;
+      }
+    } else if (sub.name.type === "JSXMemberExpression") {
+      tagRoot = getJsxRootName(sub.name);
+    }
+    if (tagRoot && (!localNames || !localNames.has(tagRoot))) {
+      reads.add(tagRoot);
+    }
+  } else if (sub.type === "JSXFragment" || sub.type === "JSXOpeningFragment") {
+    if (jsxFragPragma) {
+      reads.add(jsxFragPragma);
+    }
+  }
+}
+
 function extractBindingNames(pattern: any, defines: Set<string>) {
   if (!pattern) return;
   switch (pattern.type) {
@@ -103,7 +157,11 @@ function extractBindingNames(pattern: any, defines: Set<string>) {
   }
 }
 
-function extractSymbols(node: any): { defines: Set<string>; reads: Set<string>; is_side_effect: boolean } {
+function extractSymbols(
+  node: any,
+  jsxPragma: string | null = null,
+  jsxFragPragma: string | null = null
+): { defines: Set<string>; reads: Set<string>; is_side_effect: boolean } {
   const defines = new Set<string>();
   const reads = new Set<string>();
   let is_side_effect = false;
@@ -150,6 +208,7 @@ function extractSymbols(node: any): { defines: Set<string>; reads: Set<string>; 
           reads.add(sub.name);
         }
       }
+      checkJsx(sub, reads, localNames, jsxPragma, jsxFragPragma);
     });
     return { defines, reads, is_side_effect };
   }
@@ -168,6 +227,7 @@ function extractSymbols(node: any): { defines: Set<string>; reads: Set<string>; 
           reads.add(sub.name);
         }
       }
+      checkJsx(sub, reads, null, jsxPragma, jsxFragPragma);
     });
     return { defines, reads, is_side_effect };
   }
@@ -190,6 +250,7 @@ function extractSymbols(node: any): { defines: Set<string>; reads: Set<string>; 
           if (sub.type === "Identifier" && isReadContext(sub, parent)) {
             reads.add(sub.name);
           }
+          checkJsx(sub, reads, null, jsxPragma, jsxFragPragma);
         });
       }
     }
@@ -202,6 +263,7 @@ function extractSymbols(node: any): { defines: Set<string>; reads: Set<string>; 
     if (sub.type === "Identifier" && isReadContext(sub, parent)) {
       reads.add(sub.name);
     }
+    checkJsx(sub, reads, null, jsxPragma, jsxFragPragma);
   });
 
   return { defines, reads, is_side_effect };
@@ -251,6 +313,10 @@ function isReadContext(node: any, parent: any): boolean {
   }
   // Ignore property keys in member expressions: obj.foo
   if ((parent.type === "MemberExpression" || parent.type === "OptionalMemberExpression") && parent.property === node && !parent.computed) {
+    return false;
+  }
+  // Ignore JSX attribute names: <div className="..." /> -> className is not a variable read
+  if (parent.type === "JSXAttribute" && parent.name === node) {
     return false;
   }
   // Ignore type annotations
@@ -410,6 +476,7 @@ async function run() {
 
   const sourceLines = source.split(/\r?\n/);
   const statements: any[] = [];
+  const { jsxPragma, jsxFragPragma } = extractJsxPragmas(source);
 
   for (let idx = 0; idx < ast.program.body.length; idx++) {
     const node = ast.program.body[idx];
@@ -420,7 +487,7 @@ async function run() {
       endLn++;
     }
 
-    const { defines, reads, is_side_effect } = extractSymbols(node);
+    const { defines, reads, is_side_effect } = extractSymbols(node, jsxPragma, jsxFragPragma);
     statements.push({
       index: idx,
       start_line: startLn,
