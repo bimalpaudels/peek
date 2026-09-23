@@ -2,6 +2,8 @@ package runner
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -158,5 +160,111 @@ p.title;
 	res := runBunTest(t, source, &targetLine)
 	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "➜ \"Book\"") {
 		t.Errorf("expected '➜ \"Book\"', got %v", res.Blocks)
+	}
+}
+
+func TestBunRunner_ZeroDiskFootprint(t *testing.T) {
+	tmpDir := t.TempDir()
+	filePath := filepath.Join(tmpDir, "scratchpad.ts")
+	source := `const a = 100;
+const b = 200;
+a + b;
+`
+	if err := os.WriteFile(filePath, []byte(source), 0644); err != nil {
+		t.Fatalf("failed to write test file: %v", err)
+	}
+
+	r, err := NewBunRunner()
+	if err != nil {
+		t.Skipf("skipping bun runner test: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	targetLine := 3
+	res, err := r.Execute(ctx, filePath, source, &targetLine, 30)
+	if err != nil {
+		t.Fatalf("unexpected runner error: %v", err)
+	}
+
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "➜ 300") {
+		t.Errorf("expected '➜ 300', got %v", res.Blocks)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("failed to read temp dir: %v", err)
+	}
+
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".peek_tmp_") {
+			t.Errorf("found unwanted temporary file on disk: %s", entry.Name())
+		}
+	}
+}
+
+func TestBunRunner_RelativeImportsInMemory(t *testing.T) {
+	tmpDir := t.TempDir()
+	helperPath := filepath.Join(tmpDir, "helper.ts")
+	helperCode := `export function multiply(a: number, b: number): number {
+    return a * b;
+}
+`
+	if err := os.WriteFile(helperPath, []byte(helperCode), 0644); err != nil {
+		t.Fatalf("failed to write helper file: %v", err)
+	}
+
+	mainPath := filepath.Join(tmpDir, "main.ts")
+	mainSource := `import { multiply } from "./helper";
+
+const ans = multiply(6, 7);
+ans;
+`
+	r, err := NewBunRunner()
+	if err != nil {
+		t.Skipf("skipping bun runner test: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	targetLine := 4
+	res, err := r.Execute(ctx, mainPath, mainSource, &targetLine, 30)
+	if err != nil {
+		t.Fatalf("unexpected runner error: %v", err)
+	}
+
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "➜ 42") {
+		t.Errorf("expected '➜ 42' via in-memory relative import resolution, got %v", res.Blocks)
+	}
+}
+
+func TestBunRunner_NonMutatingCallsNotSliced(t *testing.T) {
+	source := `const items = [10, 20, 30];
+const explosive = () => { throw new Error("explosive called"); };
+// Non-mutating methods must not trigger dependency slice
+items.map(() => explosive());
+items.filter(() => explosive());
+items.slice(0, 1);
+
+items[0];
+`
+	targetLine := 8
+	res := runBunTest(t, source, &targetLine)
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "➜ 10") {
+		t.Errorf("expected non-mutating calls to be omitted during slicing, got %v", res.Blocks)
+	}
+}
+
+func TestBunRunner_MapSetMutations(t *testing.T) {
+	source := `const m = new Map<string, number>();
+m.set("answer", 42);
+m.get("answer");
+`
+	targetLine := 3
+	res := runBunTest(t, source, &targetLine)
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "➜ 42") {
+		t.Errorf("expected map mutation to be sliced in, got %v", res.Blocks)
 	}
 }

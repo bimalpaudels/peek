@@ -1,7 +1,30 @@
 import { parse } from "@babel/parser";
-import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
+
+const MUTATING_ARRAY_METHODS = new Set([
+  "push",
+  "pop",
+  "shift",
+  "unshift",
+  "splice",
+  "sort",
+  "reverse",
+  "fill",
+  "copyWithin",
+]);
+
+const MUTATING_MAP_SET_METHODS = new Set([
+  "set",
+  "delete",
+  "clear",
+  "add",
+]);
+
+const MUTATING_METHODS = new Set([
+  ...MUTATING_ARRAY_METHODS,
+  ...MUTATING_MAP_SET_METHODS,
+]);
 
 const OUTPUT_PREFIXES = ["=>", "➜", "❯", "✕", "…"];
 
@@ -197,11 +220,25 @@ function checkMutations(sub: any, defines: Set<string>, reads: Set<string>) {
       defines.add(root);
       reads.add(root);
     }
-  } else if (sub.type === "CallExpression" && sub.callee && sub.callee.type === "MemberExpression") {
-    const root = getRootName(sub.callee.object);
-    if (root) {
-      defines.add(root);
-      reads.add(root);
+  } else if (
+    sub.type === "CallExpression" &&
+    sub.callee &&
+    (sub.callee.type === "MemberExpression" || sub.callee.type === "OptionalMemberExpression")
+  ) {
+    const prop = sub.callee.property;
+    let methodName: string | null = null;
+    if (!sub.callee.computed && prop && prop.type === "Identifier") {
+      methodName = prop.name;
+    } else if (sub.callee.computed && prop && prop.type === "StringLiteral") {
+      methodName = prop.value;
+    }
+
+    if (methodName && MUTATING_METHODS.has(methodName)) {
+      const root = getRootName(sub.callee.object);
+      if (root) {
+        defines.add(root);
+        reads.add(root);
+      }
     }
   }
 }
@@ -433,6 +470,8 @@ async function run() {
     neededIndices = new Set<number>(computeDependencies(statements, targetIdx));
   }
 
+  const workDir = filePath !== "<scratchpad>" ? path.dirname(path.resolve(filePath)) : process.cwd();
+
   // Synthesize runner script
   const topImports: string[] = [];
   const bodyStatements: string[] = [];
@@ -442,7 +481,18 @@ async function run() {
     const node = stmt.node;
 
     if (node.type === "ImportDeclaration") {
-      topImports.push(source.slice(node.start, node.end));
+      let importCode = source.slice(node.start, node.end);
+      if (node.source && typeof node.source.value === "string") {
+        try {
+          const resolved = Bun.resolveSync(node.source.value, workDir);
+          const relStart = node.source.start - node.start;
+          const relEnd = node.source.end - node.start;
+          importCode = importCode.slice(0, relStart) + JSON.stringify(resolved) + importCode.slice(relEnd);
+        } catch {
+          // Keep original specifier so it errors naturally during execution
+        }
+      }
+      topImports.push(importCode);
       continue;
     }
 
@@ -516,14 +566,23 @@ try {
 }
 `;
 
-  const workDir = filePath !== "<scratchpad>" ? path.dirname(path.resolve(filePath)) : process.cwd();
+  const ext = path.extname(filePath).toLowerCase();
+  const loader = (ext === ".tsx" || ext === ".jsx") ? "tsx" : (ext === ".js" || ext === ".mjs" || ext === ".cjs") ? "js" : "ts";
   const rand = crypto.randomBytes(6).toString("hex");
-  const tempFilePath = path.join(workDir, `.peek_tmp_${rand}.ts`);
+  const virtualModuleId = `peek:run:${Date.now()}_${rand}`;
+
+  Bun.plugin({
+    setup(builder) {
+      builder.module(virtualModuleId, () => ({
+        contents: runnerScript,
+        loader,
+      }));
+    },
+  });
 
   let executionRecords: Record<number, any> = {};
   try {
-    fs.writeFileSync(tempFilePath, runnerScript, "utf-8");
-    await import(tempFilePath);
+    await import(virtualModuleId);
     executionRecords = (globalThis as any).__peek_records__ || {};
   } catch (importErr: any) {
     console.log(JSON.stringify({
@@ -531,12 +590,6 @@ try {
       blocks: [],
     }));
     return;
-  } finally {
-    try {
-      if (fs.existsSync(tempFilePath)) {
-        fs.unlinkSync(tempFilePath);
-      }
-    } catch {}
   }
 
   const results: any[] = [];
@@ -567,7 +620,7 @@ try {
       if (rec.err.stack) {
         const stackLines = rec.err.stack.split("\n").slice(1);
         for (const l of stackLines) {
-          if (l.includes(".peek_tmp_") || l.includes("harness.js") || l.includes("harness.ts")) {
+          if (l.includes(".peek_tmp_") || l.includes("harness.js") || l.includes("harness.ts") || l.includes("peek:run:")) {
             continue;
           }
           errorLines.push(l.trim());

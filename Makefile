@@ -24,7 +24,13 @@ build:
 bundle-harness:
 	@echo "==> Bundling TypeScript harness..."
 	@TMP_DIR=$$(mktemp -d) && \
-	(cd "$$TMP_DIR" && bun add @babel/parser >/dev/null 2>&1) && \
+	(CACHED=$$(ls -d "$$HOME/.bun/install/cache/@babel/parser@"* 2>/dev/null | tail -n 1); \
+	if [ -n "$$CACHED" ] && [ -d "$$CACHED" ]; then \
+		mkdir -p "$$TMP_DIR/node_modules/@babel"; \
+		ln -s "$$CACHED" "$$TMP_DIR/node_modules/@babel/parser"; \
+	else \
+		(cd "$$TMP_DIR" && bun add @babel/parser >/dev/null 2>&1); \
+	fi) && \
 	NODE_PATH="$$TMP_DIR/node_modules" bun build internal/runner/harness.ts --outfile internal/runner/harness.js --target=bun --minify && \
 	rm -rf "$$TMP_DIR"
 	@echo "✓ Bundled harness.js ($$(ls -lh internal/runner/harness.js | awk '{print $$5}'))"
