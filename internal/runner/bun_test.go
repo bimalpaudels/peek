@@ -268,3 +268,27 @@ m.get("answer");
 		t.Errorf("expected map mutation to be sliced in, got %v", res.Blocks)
 	}
 }
+
+func TestBunRunner_BareExportEmptyModuleMarker(t *testing.T) {
+	source := `export {};
+
+async function compute() {
+    return 42;
+}
+
+await compute();
+`
+	// 1. Target line 1 (export {}) - strict no-op
+	targetLine1 := 1
+	res1 := runBunTest(t, source, &targetLine1)
+	if len(res1.Blocks) != 0 {
+		t.Errorf("expected 0 blocks for export {} line, got %v", res1.Blocks)
+	}
+
+	// 2. Target line 7 (await compute()) - evaluates cleanly with export {} present
+	targetLine7 := 7
+	res7 := runBunTest(t, source, &targetLine7)
+	if len(res7.Blocks) != 1 || !strings.Contains(strings.Join(res7.Blocks[0].Outputs, "\n"), "➜ 42") {
+		t.Errorf("expected '➜ 42', got %v", res7.Blocks)
+	}
+}

@@ -3,7 +3,8 @@
 // 1. Inline expression outputs (fits inline on the line)
 const x: number = 42;
 const y: number = x * 2;
-y;
+x
+
 
 // 2. Captured stdout (block comments prefixed with ❯)
 console.log(`Computed value y=${y}`);
@@ -39,3 +40,5 @@ await fetchScore(3);
 // 5. Array transformations & methods
 const numbers = Array.from({ length: 6 }, (_, i) => (i + 1) ** 2);
 numbers;
+
+export {}

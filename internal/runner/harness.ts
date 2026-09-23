@@ -458,7 +458,9 @@ async function run() {
       effectiveTarget.type === "FunctionDeclaration" ||
       effectiveTarget.type === "ClassDeclaration" ||
       effectiveTarget.type === "TSInterfaceDeclaration" ||
-      effectiveTarget.type === "TSTypeAliasDeclaration"
+      effectiveTarget.type === "TSTypeAliasDeclaration" ||
+      (targetNode.type === "ExportNamedDeclaration" && !targetNode.declaration) ||
+      targetNode.type === "ExportAllDeclaration"
     ) {
       console.log(JSON.stringify({ blocks: [] }));
       return;
@@ -493,6 +495,15 @@ async function run() {
         }
       }
       topImports.push(importCode);
+      continue;
+    }
+
+    if (node.type === "ExportNamedDeclaration" && !node.declaration) {
+      // Bare export statements (e.g. export {}; or export { a };) cannot be placed inside try/catch blocks
+      continue;
+    }
+
+    if (node.type === "ExportAllDeclaration") {
       continue;
     }
 
