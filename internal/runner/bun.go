@@ -12,57 +12,55 @@ import (
 	"strings"
 )
 
-// PythonRunner executes Python code strictly using `uv run python`.
-type PythonRunner struct {
-	UVPath        string
-	PythonVersion string
-	MaxStrLen     int
+// BunRunner executes TypeScript and JavaScript code strictly using `bun run`.
+type BunRunner struct {
+	BunPath   string
+	MaxStrLen int
 }
 
-func NewPythonRunner(customUVPath ...string) (*PythonRunner, error) {
-	var uvPath string
-	if len(customUVPath) > 0 && strings.TrimSpace(customUVPath[0]) != "" {
-		uvPath = strings.TrimSpace(customUVPath[0])
+func NewBunRunner(customBunPath ...string) (*BunRunner, error) {
+	var bunPath string
+	if len(customBunPath) > 0 && strings.TrimSpace(customBunPath[0]) != "" {
+		bunPath = strings.TrimSpace(customBunPath[0])
 	} else {
-		// Look for uv in PATH or standard user directories
+		// Look for bun in PATH or standard user directories
 		var err error
-		uvPath, err = exec.LookPath("uv")
+		bunPath, err = exec.LookPath("bun")
 		if err != nil {
 			home, _ := os.UserHomeDir()
 			candidates := []string{
-				filepath.Join(home, ".local", "bin", "uv"),
-				filepath.Join(home, ".cargo", "bin", "uv"),
-				"/opt/homebrew/bin/uv",
-				"/usr/local/bin/uv",
+				filepath.Join(home, ".bun", "bin", "bun"),
+				filepath.Join(home, ".local", "bin", "bun"),
+				"/opt/homebrew/bin/bun",
+				"/usr/local/bin/bun",
 			}
 			for _, c := range candidates {
 				if fi, err := os.Stat(c); err == nil && fi.Mode()&0111 != 0 {
-					uvPath = c
+					bunPath = c
 					break
 				}
 			}
 		}
 	}
 
-	if uvPath == "" {
-		return nil, fmt.Errorf("peek requires 'uv' to run Python, but 'uv' was not found on PATH.\nPlease install uv: curl -LsSf https://astral.sh/uv/install.sh | sh")
+	if bunPath == "" {
+		return nil, fmt.Errorf("peek requires 'bun' to run TypeScript/JavaScript, but 'bun' was not found on PATH.\nPlease install bun: curl -fsSL https://bun.sh/install | bash")
 	}
 
-	return &PythonRunner{
-		UVPath:    uvPath,
+	return &BunRunner{
+		BunPath:   bunPath,
 		MaxStrLen: 140,
 	}, nil
 }
 
-func (p *PythonRunner) CommentPrefix() string {
-	return "#"
+func (b *BunRunner) CommentPrefix() string {
+	return "//"
 }
 
+//go:embed harness.js
+var bunHarness string
 
-//go:embed harness.py
-var pythonHarness string
-
-type pythonPayload struct {
+type bunPayload struct {
 	FilePath   string `json:"file_path"`
 	Source     string `json:"source"`
 	TargetLine *int   `json:"target_line,omitempty"`
@@ -70,7 +68,7 @@ type pythonPayload struct {
 	MaxStrLen  int    `json:"max_str_len,omitempty"`
 }
 
-func (p *PythonRunner) Execute(
+func (b *BunRunner) Execute(
 	ctx context.Context,
 	filePath string,
 	source string,
@@ -83,12 +81,12 @@ func (p *PythonRunner) Execute(
 	}
 	dir := filepath.Dir(absPath)
 
-	maxStr := p.MaxStrLen
+	maxStr := b.MaxStrLen
 	if maxStr <= 0 {
 		maxStr = 140
 	}
 
-	payloadBytes, err := json.Marshal(pythonPayload{
+	payloadBytes, err := json.Marshal(bunPayload{
 		FilePath:   absPath,
 		Source:     source,
 		TargetLine: targetLine,
@@ -99,19 +97,13 @@ func (p *PythonRunner) Execute(
 		return nil, err
 	}
 
-	harnessPath := getHarnessPath()
+	harnessPath := getBunHarnessPath()
 	var cmd *exec.Cmd
-	args := []string{"run"}
-	if p.PythonVersion != "" {
-		args = append(args, "--python", p.PythonVersion)
-	}
-	args = append(args, "python")
 	if harnessPath != "" {
-		args = append(args, harnessPath)
+		cmd = exec.CommandContext(ctx, b.BunPath, "run", harnessPath)
 	} else {
-		args = append(args, "-c", pythonHarness)
+		cmd = exec.CommandContext(ctx, b.BunPath, "run", "-e", bunHarness)
 	}
-	cmd = exec.CommandContext(ctx, p.UVPath, args...)
 	cmd.Dir = dir
 	cmd.Stdin = bytes.NewReader(payloadBytes)
 
@@ -127,7 +119,7 @@ func (p *PythonRunner) Execute(
 		if strings.TrimSpace(errOutput) == "" {
 			errOutput = stdoutBuf.String()
 		}
-		return nil, fmt.Errorf("uv execution failed: %v\n%s", err, errOutput)
+		return nil, fmt.Errorf("bun execution failed: %v\n%s", err, errOutput)
 	}
 
 	var resp ExecutionResult
@@ -138,7 +130,7 @@ func (p *PythonRunner) Execute(
 	return &resp, nil
 }
 
-func getHarnessPath() string {
+func getBunHarnessPath() string {
 	cacheDir, err := os.UserCacheDir()
 	if err != nil {
 		cacheDir = os.TempDir()
@@ -147,14 +139,14 @@ func getHarnessPath() string {
 	if err := os.MkdirAll(peekDir, 0755); err != nil {
 		return ""
 	}
-	harnessFile := filepath.Join(peekDir, "harness.py")
+	harnessFile := filepath.Join(peekDir, "harness.js")
 
 	// If file exists and matches embedded version, reuse it
-	if data, err := os.ReadFile(harnessFile); err == nil && string(data) == pythonHarness {
+	if data, err := os.ReadFile(harnessFile); err == nil && string(data) == bunHarness {
 		return harnessFile
 	}
 
-	if err := os.WriteFile(harnessFile, []byte(pythonHarness), 0644); err == nil {
+	if err := os.WriteFile(harnessFile, []byte(bunHarness), 0644); err == nil {
 		return harnessFile
 	}
 	return ""

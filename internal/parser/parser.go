@@ -10,13 +10,28 @@ import (
 	"peek/internal/runner"
 )
 
+// DetectCommentPrefix returns the standard single-line comment prefix for the given file.
+func DetectCommentPrefix(filePath string) string {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	switch ext {
+	case ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".go":
+		return "//"
+	default:
+		return "#"
+	}
+}
+
 // isOutputComment reports whether the trimmed line is a scratchpad output comment.
 func isOutputComment(line string) bool {
 	trimmed := strings.TrimSpace(line)
-	if !strings.HasPrefix(trimmed, "#") {
+	var rest string
+	if strings.HasPrefix(trimmed, "//") {
+		rest = strings.TrimSpace(trimmed[2:])
+	} else if strings.HasPrefix(trimmed, "#") {
+		rest = strings.TrimSpace(trimmed[1:])
+	} else {
 		return false
 	}
-	rest := strings.TrimSpace(trimmed[1:])
 	return strings.HasPrefix(rest, "=>") ||
 		strings.HasPrefix(rest, "➜") ||
 		strings.HasPrefix(rest, "❯") ||
@@ -24,13 +39,17 @@ func isOutputComment(line string) bool {
 		strings.HasPrefix(rest, "…")
 }
 
-// formatOutputComment ensures the output line is prefixed with '# '.
-func formatOutputComment(out string) string {
+// formatOutputComment ensures the output line is prefixed with the appropriate comment prefix (e.g. '# ' or '// ').
+func formatOutputComment(out string, commentPrefix ...string) string {
+	prefix := "#"
+	if len(commentPrefix) > 0 && commentPrefix[0] != "" {
+		prefix = commentPrefix[0]
+	}
 	cleanOut := strings.TrimRight(out, "\r\n")
-	if strings.HasPrefix(cleanOut, "#") {
+	if strings.HasPrefix(cleanOut, prefix) {
 		return cleanOut
 	}
-	return fmt.Sprintf("# %s", cleanOut)
+	return fmt.Sprintf("%s %s", prefix, cleanOut)
 }
 
 // splitCodeAndOutput strips trailing output comments from block lines and returns the remaining code lines.
@@ -46,6 +65,7 @@ func splitCodeAndOutput(lines []string) []string {
 }
 
 // stripInlineOutputComment removes any trailing scratchpad output comment from a single code line.
+// It handles single-quotes, double-quotes, triple-quotes, and JavaScript/TypeScript backtick template literals.
 func stripInlineOutputComment(line string) (string, bool) {
 	inQuote := byte(0)
 	for i := 0; i < len(line); i++ {
@@ -78,6 +98,13 @@ func stripInlineOutputComment(line string) (string, bool) {
 			inQuote = ch
 			continue
 		}
+		if ch == '`' {
+			inQuote = ch
+			continue
+		}
+		if ch == '/' && i+1 < len(line) && line[i+1] == '/' && isOutputComment(line[i:]) {
+			return strings.TrimRight(line[:i], " \t"), true
+		}
 		if ch == '#' && isOutputComment(line[i:]) {
 			return strings.TrimRight(line[:i], " \t"), true
 		}
@@ -86,11 +113,15 @@ func stripInlineOutputComment(line string) (string, bool) {
 }
 
 // ApplyBlockOutputs splices the formatted outputs of the given blocks into content.
-// Short single-line expression outputs are attached inline (e.g. `x  # ➜ 10`),
+// Short single-line expression outputs are attached inline (e.g. `x  # ➜ 10` or `x  // ➜ 10`),
 // while multi-line, long, or printed (stdout) outputs are placed below.
-func ApplyBlockOutputs(content string, blockResults []runner.BlockResult, lineWidth ...int) (string, error) {
+func ApplyBlockOutputs(content string, blockResults []runner.BlockResult, commentPrefix string, lineWidth ...int) (string, error) {
 	if len(blockResults) == 0 {
 		return content, nil
+	}
+
+	if commentPrefix == "" {
+		commentPrefix = "#"
 	}
 
 	maxLineWidth := 100
@@ -134,18 +165,18 @@ func ApplyBlockOutputs(content string, blockResults []runner.BlockResult, lineWi
 		// 1. Exactly 1 output line
 		// 2. Output is an evaluated expression (starts with ➜), not a print log (❯) or error (✕)
 		// 3. Statement is single-line (len(codeLines) == 1)
-		// 4. Combined length fits within 100 characters
+		// 4. Combined length fits within maxLineWidth
 		isInline := len(b.Outputs) == 1 && len(codeLines) == 1 &&
 			strings.HasPrefix(strings.TrimSpace(b.Outputs[0]), "➜") &&
-			len(lines[startIdx])+2+len(formatOutputComment(b.Outputs[0])) <= maxLineWidth
+			len(lines[startIdx])+2+len(formatOutputComment(b.Outputs[0], commentPrefix)) <= maxLineWidth
 
 		var newBlock []string
 		if isInline {
-			newBlock = []string{fmt.Sprintf("%s  %s", lines[startIdx], formatOutputComment(b.Outputs[0]))}
+			newBlock = []string{fmt.Sprintf("%s  %s", lines[startIdx], formatOutputComment(b.Outputs[0], commentPrefix))}
 		} else {
 			newBlock = append(newBlock, codeLines...)
 			for _, out := range b.Outputs {
-				newBlock = append(newBlock, formatOutputComment(out))
+				newBlock = append(newBlock, formatOutputComment(out, commentPrefix))
 			}
 		}
 

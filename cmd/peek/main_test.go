@@ -74,6 +74,22 @@ func TestParseArgs(t *testing.T) {
 			wantTimeout:  10,
 		},
 		{
+			name:         "typescript file with line",
+			args:         []string{"index.ts:15"},
+			wantFile:     "index.ts",
+			wantLine:     intPtr(15),
+			wantMaxLines: 30,
+			wantTimeout:  10,
+		},
+		{
+			name:         "tsx file with clean flag",
+			args:         []string{"component.tsx", "--clean"},
+			wantFile:     "component.tsx",
+			wantClean:    true,
+			wantMaxLines: 30,
+			wantTimeout:  10,
+		},
+		{
 			name:    "empty args error",
 			args:    []string{},
 			wantErr: true,

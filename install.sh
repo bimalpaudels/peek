@@ -84,13 +84,9 @@ else
     TAG_DISPLAY="latest"
 fi
 
-# 4. Determine Installation Directory
+# 4. Determine Installation Directory (defaults to ~/.local/bin, modern standard)
 if [ -z "$INSTALL_DIR" ]; then
-    if [ -w "/usr/local/bin" ]; then
-        INSTALL_DIR="/usr/local/bin"
-    else
-        INSTALL_DIR="${HOME}/.local/bin"
-    fi
+    INSTALL_DIR="${HOME}/.local/bin"
 fi
 
 info "Installing peek (${TAG_DISPLAY}) for ${OS}/${ARCH}..."

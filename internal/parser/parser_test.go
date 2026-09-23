@@ -35,7 +35,7 @@ y * 2`
 		},
 	}
 
-	updated, err := ApplyBlockOutputs(code, results)
+	updated, err := ApplyBlockOutputs(code, results, "#")
 	if err != nil {
 		t.Fatalf("ApplyBlockOutputs failed: %v", err)
 	}
@@ -63,7 +63,7 @@ y * 2  # ➜ 40`
 			Outputs:   []string{"➜ 999"},
 		},
 	}
-	updated2, err := ApplyBlockOutputs(updated, results2)
+	updated2, err := ApplyBlockOutputs(updated, results2, "#")
 	if err != nil {
 		t.Fatalf("ApplyBlockOutputs failed on re-run: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestCRLFHandling(t *testing.T) {
 			Outputs:   []string{"➜ 42"},
 		},
 	}
-	applied, err := ApplyBlockOutputs(cleaned, results)
+	applied, err := ApplyBlockOutputs(cleaned, results, "#")
 	if err != nil {
 		t.Fatalf("ApplyBlockOutputs failed on CRLF: %v", err)
 	}
@@ -208,7 +208,7 @@ z = 30`
 		},
 	}
 
-	updated, err := ApplyBlockOutputs(code, results)
+	updated, err := ApplyBlockOutputs(code, results, "#")
 	if err != nil {
 		t.Fatalf("ApplyBlockOutputs failed: %v", err)
 	}
@@ -238,7 +238,7 @@ user`
 		},
 	}
 
-	updated, err := ApplyBlockOutputs(code, results)
+	updated, err := ApplyBlockOutputs(code, results, "#")
 	if err != nil {
 		t.Fatalf("ApplyBlockOutputs failed: %v", err)
 	}
@@ -253,4 +253,110 @@ user
 		t.Errorf("expected multi-line pretty print comment block:\nGOT:\n%s\nWANT:\n%s", updated, expected)
 	}
 }
+
+func TestDetectCommentPrefix(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"script.py", "#"},
+		{"main.PY", "#"},
+		{"app.ts", "//"},
+		{"component.tsx", "//"},
+		{"server.js", "//"},
+		{"module.mjs", "//"},
+		{"legacy.cjs", "//"},
+		{"util.go", "//"},
+		{"unknown.xyz", "#"},
+	}
+
+	for _, tt := range tests {
+		if got := DetectCommentPrefix(tt.path); got != tt.want {
+			t.Errorf("DetectCommentPrefix(%q) = %q, want %q", tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestApplyBlockOutputs_TypeScript(t *testing.T) {
+	code := `const x: number = 10;
+x + 5;
+
+const name = "Alice";
+console.log("hello", name);
+name.toUpperCase();`
+
+	results := []runner.BlockResult{
+		{
+			StartLine: 2,
+			EndLine:   2,
+			Outputs:   []string{"➜ 15"},
+		},
+		{
+			StartLine: 4,
+			EndLine:   5,
+			Outputs:   []string{"❯ hello Alice"},
+		},
+		{
+			StartLine: 6,
+			EndLine:   6,
+			Outputs:   []string{"➜ 'ALICE'"},
+		},
+	}
+
+	updated, err := ApplyBlockOutputs(code, results, "//")
+	if err != nil {
+		t.Fatalf("ApplyBlockOutputs with // failed: %v", err)
+	}
+
+	expected := `const x: number = 10;
+x + 5;  // ➜ 15
+
+const name = "Alice";
+console.log("hello", name);
+// ❯ hello Alice
+name.toUpperCase();  // ➜ 'ALICE'`
+
+	if updated != expected {
+		t.Errorf("TypeScript updated content mismatch:\nGOT:\n%s\nWANT:\n%s", updated, expected)
+	}
+}
+
+func TestCleanOutputs_TypeScript(t *testing.T) {
+	code := `const x = 10;  // ➜ 10
+console.log("running");
+// ❯ running
+// => 10
+// ✕ TypeError: x is not a function
+const y = 20;`
+
+	cleaned := CleanOutputs(code)
+
+	for _, bad := range []string{"// ➜ 10", "// ❯ running", "// => 10", "// ✕ TypeError"} {
+		if strings.Contains(cleaned, bad) {
+			t.Errorf("CleanOutputs failed to strip %q; got:\n%s", bad, cleaned)
+		}
+	}
+
+	expected := `const x = 10;
+console.log("running");
+const y = 20;`
+
+	if strings.TrimSpace(cleaned) != expected {
+		t.Errorf("CleanOutputs mismatch:\nGOT:\n%s\nWANT:\n%s", cleaned, expected)
+	}
+}
+
+func TestStripInlineOutputComment_TypeScriptTemplateLiteral(t *testing.T) {
+	// Template literal containing // should not be stripped as a comment
+	lineWithTemplate := "const url = `https://api.test//v1`;  // ➜ ok"
+	stripped, ok := stripInlineOutputComment(lineWithTemplate)
+	if !ok {
+		t.Fatalf("expected comment to be stripped")
+	}
+	expected := "const url = `https://api.test//v1`;"
+	if stripped != expected {
+		t.Errorf("stripInlineOutputComment mismatch:\nGOT:  %q\nWANT: %q", stripped, expected)
+	}
+}
+
 

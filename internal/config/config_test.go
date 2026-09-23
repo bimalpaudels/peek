@@ -33,6 +33,7 @@ max_str_len = 200
 load_env = false
 uv_path = "/custom/bin/uv"
 python_version = "3.12"
+bun_path = "/custom/bin/bun"
 `
 	cfg, err := Parse(toml)
 	if err != nil {
@@ -59,6 +60,9 @@ python_version = "3.12"
 	}
 	if cfg.PythonVersion != "3.12" {
 		t.Errorf("expected PythonVersion='3.12', got %q", cfg.PythonVersion)
+	}
+	if cfg.BunPath != "/custom/bin/bun" {
+		t.Errorf("expected BunPath='/custom/bin/bun', got %q", cfg.BunPath)
 	}
 }
 
