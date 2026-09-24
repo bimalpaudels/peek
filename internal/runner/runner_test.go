@@ -386,6 +386,59 @@ asyncio.gather(fetch(1), fetch(2))
 	}
 }
 
+func TestPythonRunner_TargetAssignment(t *testing.T) {
+	source := "x = 10 * 42\n"
+	targetLine := 1
+	res := runTest(t, source, &targetLine)
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "➜ 420") {
+		t.Errorf("expected '➜ 420', got %v", res.Blocks)
+	}
+}
+
+func TestPythonRunner_AnnotatedAndAugmentedAssign(t *testing.T) {
+	source := "x: int = 100\nx += 50\n"
+	targetLine := 2
+	res := runTest(t, source, &targetLine)
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "➜ 150") {
+		t.Errorf("expected '➜ 150', got %v", res.Blocks)
+	}
+}
+
+func TestPythonRunner_MultiAssignment(t *testing.T) {
+	source := "a, b = 1, 2\n"
+	targetLine := 1
+	res := runTest(t, source, &targetLine)
+	if len(res.Blocks) != 1 || !strings.Contains(strings.Join(res.Blocks[0].Outputs, "\n"), "➜ a=1, b=2") {
+		t.Errorf("expected '➜ a=1, b=2', got %v", res.Blocks)
+	}
+}
+
+func TestPythonRunner_ListAndDictMutation(t *testing.T) {
+	// List mutation via .append()
+	sourceList := "nums = [1, 2]\nnums.append(3)\n"
+	targetLine := 2
+	resList := runTest(t, sourceList, &targetLine)
+	if len(resList.Blocks) != 1 || !strings.Contains(strings.Join(resList.Blocks[0].Outputs, "\n"), "➜ [1, 2, 3]") {
+		t.Errorf("expected '➜ [1, 2, 3]', got %v", resList.Blocks)
+	}
+
+	// Dict subscript mutation
+	sourceDict := "d = {}\nd[\"key\"] = \"val\"\n"
+	resDict := runTest(t, sourceDict, &targetLine)
+	if len(resDict.Blocks) != 1 || !strings.Contains(strings.Join(resDict.Blocks[0].Outputs, "\n"), "'key': 'val'") {
+		t.Errorf("expected dict mutation output, got %v", resDict.Blocks)
+	}
+}
+
+func TestPythonRunner_IgnoredVariable(t *testing.T) {
+	source := "_ = 123\n"
+	targetLine := 1
+	res := runTest(t, source, &targetLine)
+	if len(res.Blocks) != 1 || len(res.Blocks[0].Outputs) != 0 {
+		t.Errorf("expected empty outputs for '_ = 123', got %v", res.Blocks)
+	}
+}
+
 func TestForFile(t *testing.T) {
 	// 1. Python file returns PythonRunner with prefix #
 	r, err := ForFile("test.py", nil)
