@@ -18,7 +18,7 @@ import (
 // SliceArgs defines the input schema for the peek_slice tool.
 type SliceArgs struct {
 	File     string `json:"file" jsonschema:"Relative or absolute path to the target file (.py, .ts, .js)"`
-	Line     *int   `json:"line,omitempty" jsonschema:"Optional 1-indexed target line number. If omitted or null, evaluates all statements top-to-bottom."`
+	Line     int    `json:"line" jsonschema:"1-indexed target line number to evaluate. Executes only required upstream dependencies."`
 	Timeout  *int   `json:"timeout,omitempty" jsonschema:"Optional execution timeout in seconds (overrides default config)."`
 	MaxLines *int   `json:"max_lines,omitempty" jsonschema:"Optional maximum output lines per block (overrides default config)."`
 }
@@ -40,7 +40,7 @@ func NewServer(cfg *config.Config, version string) *Server {
 	}
 
 	opts := &mcp.ServerOptions{
-		Instructions: "peek evaluates target lines or full files in Python and TypeScript using AST dependency slicing. " +
+		Instructions: "peek evaluates target lines in Python and TypeScript files using AST dependency slicing. " +
 			"Targeting a line executes only its upstream dependencies, skipping unrelated expensive operations or side effects. " +
 			"Files are never modified on disk during evaluation.",
 	}
@@ -206,11 +206,15 @@ func (s *Server) handleSlice(ctx context.Context, req *mcp.CallToolRequest, args
 		maxLines = *args.MaxLines
 	}
 
-	var targetLine *int
-	if args.Line != nil && *args.Line > 0 {
-		lineVal := *args.Line
-		targetLine = &lineVal
+	if args.Line <= 0 {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{
+				&mcp.TextContent{Text: "Missing or invalid 'line' argument (must be a 1-indexed line number >= 1)"},
+			},
+			IsError: true,
+		}, nil, nil
 	}
+	targetLine := &args.Line
 
 	result, err := r.Execute(evalCtx, absPath, content, targetLine, maxLines)
 	if err != nil {
@@ -241,13 +245,9 @@ func (s *Server) handleSlice(ctx context.Context, req *mcp.CallToolRequest, args
 	}
 
 	if len(result.Blocks) == 0 {
-		msg := "(no output: target line is inert or blank)"
-		if targetLine == nil {
-			msg = "(no output)"
-		}
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
-				&mcp.TextContent{Text: msg},
+				&mcp.TextContent{Text: "(no output: target line is inert or blank)"},
 			},
 		}, nil, nil
 	}

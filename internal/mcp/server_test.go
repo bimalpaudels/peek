@@ -100,7 +100,7 @@ func TestMCPServer_CallToolErrors(t *testing.T) {
 	// Missing file argument
 	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "peek_slice",
-		Arguments: map[string]any{"file": ""},
+		Arguments: map[string]any{"file": "", "line": 1},
 	})
 	if err != nil {
 		t.Fatalf("unexpected call error: %v", err)
@@ -109,10 +109,22 @@ func TestMCPServer_CallToolErrors(t *testing.T) {
 		t.Errorf("expected IsError=true for empty file")
 	}
 
+	// Missing or invalid line argument (line 0 or omitted)
+	res, err = clientSession.CallTool(ctx, &mcp.CallToolParams{
+		Name:      "peek_slice",
+		Arguments: map[string]any{"file": "test.py", "line": 0},
+	})
+	if err != nil {
+		t.Fatalf("unexpected call error: %v", err)
+	}
+	if !res.IsError {
+		t.Errorf("expected IsError=true for line <= 0")
+	}
+
 	// Non-existent file
 	res, err = clientSession.CallTool(ctx, &mcp.CallToolParams{
 		Name:      "peek_slice",
-		Arguments: map[string]any{"file": "non_existent_file_xyz.py"},
+		Arguments: map[string]any{"file": "non_existent_file_xyz.py", "line": 1},
 	})
 	if err != nil {
 		t.Fatalf("unexpected call error: %v", err)
@@ -160,19 +172,5 @@ func TestMCPServer_CallToolExecution(t *testing.T) {
 	}
 	if textContent.Text != "30" {
 		t.Errorf("expected output '30', got %q", textContent.Text)
-	}
-
-	// Evaluate full file (line omitted)
-	resFull, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name: "peek_slice",
-		Arguments: map[string]any{
-			"file": pyFile,
-		},
-	})
-	if err != nil {
-		t.Fatalf("CallTool for full file failed: %v", err)
-	}
-	if resFull.IsError {
-		t.Fatalf("expected successful full file evaluation, got error: %v", resFull.Content[0].(*mcp.TextContent).Text)
 	}
 }
