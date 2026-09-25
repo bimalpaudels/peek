@@ -44,6 +44,87 @@ def _get_root_name(node):
     return None
 
 
+MUTATING_METHOD_NAMES = {
+    "append",
+    "extend",
+    "insert",
+    "remove",
+    "pop",
+    "clear",
+    "sort",
+    "reverse",
+    "update",
+    "add",
+    "discard",
+}
+
+
+class _MultiAssignResult:
+    def __init__(self, mapping):
+        self.mapping = mapping
+
+    def __repr__(self):
+        return ", ".join(f"{k}={repr(v)}" for k, v in self.mapping.items())
+
+
+def _extract_target_names(node):
+    names = []
+
+    def _collect(n):
+        if isinstance(n, ast.Name):
+            names.append(n.id)
+        elif isinstance(n, (ast.Tuple, ast.List)):
+            for elt in n.elts:
+                _collect(elt)
+        elif isinstance(n, ast.Starred):
+            _collect(n.value)
+
+    if isinstance(node, ast.Assign):
+        for t in node.targets:
+            _collect(t)
+    elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+        _collect(node.target)
+    return list(dict.fromkeys(names))
+
+
+def _resolve_statement_value(node, stmt, scope):
+    # 1. Assignments (x = ..., x: int = ..., x += ...)
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        # Check if it was a subscript or attribute mutation like d["k"] = v or arr[0] = 1
+        subscript_root = None
+        if isinstance(node, ast.Assign):
+            for t in node.targets:
+                if isinstance(t, (ast.Subscript, ast.Attribute)):
+                    subscript_root = _get_root_name(t)
+                    break
+        elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+            if isinstance(node.target, (ast.Subscript, ast.Attribute)):
+                subscript_root = _get_root_name(node.target)
+
+        if subscript_root and subscript_root in scope:
+            return scope.get(subscript_root)
+
+        # Standard identifier assignments
+        names = _extract_target_names(node)
+        candidates = [name for name in names if not name.startswith("_")]
+        if len(candidates) == 1:
+            return scope.get(candidates[0])
+        elif len(candidates) > 1:
+            return _MultiAssignResult({k: scope.get(k) for k in candidates if k in scope})
+        return None
+
+    # 2. In-place mutating method calls returning None (e.g. nums.append(4))
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+        func = node.value.func
+        if isinstance(func, ast.Attribute) and func.attr in MUTATING_METHOD_NAMES:
+            root = _get_root_name(func.value)
+            if root and root in scope:
+                return scope.get(root)
+
+    return None
+
+
+
 def _has_top_level_async(node):
     """Check if node contains top-level async constructs without descending into inner function or class definitions."""
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
@@ -130,6 +211,17 @@ def _compact_val(v, max_str=140):
 def _format_value(val, max_str=140):
     if val is None:
         return None
+
+    if isinstance(val, _MultiAssignResult):
+        items = [f"{k}={_compact_val(_normalize_obj(v), max_str=max_str)}" for k, v in val.mapping.items()]
+        rep = ", ".join(items)
+        if len(rep) <= 80 and "\n" not in rep:
+            return rep
+        lines = ["{"]
+        for k, v in val.mapping.items():
+            lines.append(f"  {k} = {_compact_val(_normalize_obj(v), max_str=max_str)},")
+        lines.append("}")
+        return "\n".join(lines)
 
     normalized = _normalize_obj(val)
     rep = repr(normalized)
@@ -463,6 +555,17 @@ def run():
                     return
                 continue
 
+            orig_end = getattr(stmt["node"], "end_lineno", None) or stmt["start_line"]
+            has_existing_outputs = stmt["end_line"] > orig_end or any(
+                _has_output_comment(source_lines[ln - 1])
+                for ln in range(stmt["start_line"], stmt["end_line"] + 1)
+                if ln - 1 < len(source_lines)
+            )
+
+            is_target = target_idx is not None and stmt["index"] == target_idx
+            if val is None and not exc_info and (is_target or has_existing_outputs):
+                val = _resolve_statement_value(stmt["node"], stmt, scope)
+
             result_repr = _format_value(val, max_str=max_str_len)
             error_lines = []
             if exc_info:
@@ -484,12 +587,6 @@ def run():
             all_std = captured_io.splitlines() if captured_io else []
             outputs = _format_outputs(all_std, result_repr, error_lines, max_lines)
 
-            orig_end = getattr(stmt["node"], "end_lineno", None) or stmt["start_line"]
-            has_existing_outputs = stmt["end_line"] > orig_end or any(
-                _has_output_comment(source_lines[ln - 1])
-                for ln in range(stmt["start_line"], stmt["end_line"] + 1)
-                if ln - 1 < len(source_lines)
-            )
             if target_idx is not None or outputs or has_existing_outputs:
                 results.append({
                     "start_line": stmt["start_line"],

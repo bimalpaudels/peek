@@ -575,15 +575,23 @@ async function run() {
     }
 
     let code = source.slice(node.start, node.end);
+    let effectiveNode = node;
     let isExpr = node.type === "ExpressionStatement";
 
     if (node.type === "ExportNamedDeclaration" && node.declaration) {
+      effectiveNode = node.declaration;
       code = source.slice(node.declaration.start, node.declaration.end);
       isExpr = node.declaration.type === "ExpressionStatement";
     } else if (node.type === "ExportDefaultDeclaration" && node.declaration) {
+      effectiveNode = node.declaration;
       code = source.slice(node.declaration.start, node.declaration.end);
       isExpr = true;
     }
+
+    const isVarDecl = effectiveNode.type === "VariableDeclaration";
+    const varDeclCandidates = isVarDecl
+      ? Array.from(stmt.defines).filter((name: any) => typeof name === "string" && !name.startsWith("_"))
+      : [];
 
     if (isExpr) {
       const exprNode = (node.type === "ExpressionStatement") ? node.expression : node.declaration;
@@ -592,6 +600,18 @@ async function run() {
 __peek_before__(${stmt.index});
 const __res_${stmt.index}__ = await (${exprCode});
 __peek_after__(${stmt.index}, __res_${stmt.index}__);
+`);
+    } else if (isVarDecl) {
+      let captureExpr = "undefined";
+      if (varDeclCandidates.length === 1) {
+        captureExpr = String(varDeclCandidates[0]);
+      } else if (varDeclCandidates.length > 1) {
+        captureExpr = `{ ${varDeclCandidates.join(", ")} }`;
+      }
+      bodyStatements.push(`
+__peek_before__(${stmt.index});
+${code};
+__peek_after__(${stmt.index}, ${captureExpr});
 `);
     } else {
       bodyStatements.push(`
@@ -706,8 +726,6 @@ try {
       }
     }
 
-    const outputs = formatOutputs(rec.logs, resultRepr, errorLines, maxLines);
-
     const origEnd = stmt.node.loc ? stmt.node.loc.end.line : stmt.start_line;
     const hasExistingOutputs =
       stmt.end_line > origEnd ||
@@ -715,6 +733,18 @@ try {
         const lineIdx = ln - 1;
         return lineIdx < sourceLines.length && hasOutputComment(sourceLines[lineIdx]);
       });
+
+    const isTarget = targetIdx !== null && stmt.index === targetIdx;
+    let effective = stmt.node;
+    if (stmt.node.type === "ExportNamedDeclaration" && stmt.node.declaration) {
+      effective = stmt.node.declaration;
+    }
+    const isVarDecl = effective.type === "VariableDeclaration";
+
+    let outputs = formatOutputs(rec.logs, resultRepr, errorLines, maxLines);
+    if (isVarDecl && !isTarget && !hasExistingOutputs) {
+      outputs = [];
+    }
 
     if (targetIdx !== null || outputs.length > 0 || hasExistingOutputs) {
       results.push({

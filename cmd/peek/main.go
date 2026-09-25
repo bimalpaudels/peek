@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"peek/internal/config"
+	"peek/internal/mcp"
 	"peek/internal/parser"
 	"peek/internal/runner"
 )
@@ -34,6 +35,7 @@ Usage:
   peek <file> <line>           Evaluate statement/block at line number (e.g. peek main.py 15)
   peek <file>                  Evaluate all statements top-to-bottom
   peek <file> --clean          Strip all comment outputs from file
+  peek mcp [--debug]           Start stdio MCP server for AI agents
 
 Options:
   --clean                      Remove all scratchpad output comments
@@ -120,6 +122,21 @@ func parseArgs(args []string, userCfg ...*config.Config) (filePath string, lineN
 
 func main() {
 	cfg := config.Load()
+
+	if len(os.Args) > 1 && os.Args[1] == "mcp" {
+		debug := false
+		for _, arg := range os.Args[2:] {
+			if arg == "--debug" {
+				debug = true
+			}
+		}
+		srv := mcp.NewServer(cfg, getFormattedVersion())
+		if err := srv.Serve(context.Background(), debug); err != nil {
+			fmt.Fprintf(os.Stderr, "peek mcp error: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
 
 	filePath, lineNo, clean, maxLines, timeout, err := parseArgs(os.Args[1:], cfg)
 	if err != nil {
