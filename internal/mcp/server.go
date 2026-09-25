@@ -84,8 +84,8 @@ func (s *Server) RunTransport(ctx context.Context, t mcp.Transport) error {
 func (s *Server) registerTools() {
 	mcp.AddTool(s.mcpSrv, &mcp.Tool{
 		Name: "peek_slice",
-		Description: "Evaluates a target line or an entire file in Python or TypeScript using AST dependency slicing. " +
-			"Runs required upstream dependencies and returns evaluated values and stdout without modifying the file on disk.",
+		Description: "Evaluates a statement or expression at a target line (or full file) in any Python or TypeScript file or project using AST dependency slicing. " +
+			"Executes only required upstream dependencies and returns evaluated values and stdout without modifying files on disk.",
 	}, s.handleSlice)
 }
 
