@@ -54,8 +54,8 @@ func TestMCPServer_ListTools(t *testing.T) {
 	}
 
 	tool := toolsResult.Tools[0]
-	if tool.Name != "peek_eval" {
-		t.Errorf("expected tool name 'peek_eval', got %q", tool.Name)
+	if tool.Name != "peek_slice" {
+		t.Errorf("expected tool name 'peek_slice', got %q", tool.Name)
 	}
 }
 
@@ -99,7 +99,7 @@ func TestMCPServer_CallToolErrors(t *testing.T) {
 
 	// Missing file argument
 	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "peek_eval",
+		Name:      "peek_slice",
 		Arguments: map[string]any{"file": ""},
 	})
 	if err != nil {
@@ -111,7 +111,7 @@ func TestMCPServer_CallToolErrors(t *testing.T) {
 
 	// Non-existent file
 	res, err = clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name:      "peek_eval",
+		Name:      "peek_slice",
 		Arguments: map[string]any{"file": "non_existent_file_xyz.py"},
 	})
 	if err != nil {
@@ -137,7 +137,7 @@ func TestMCPServer_CallToolExecution(t *testing.T) {
 
 	// Evaluate targeted line (line 4: `c`)
 	res, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name: "peek_eval",
+		Name: "peek_slice",
 		Arguments: map[string]any{
 			"file": pyFile,
 			"line": 4,
@@ -164,7 +164,7 @@ func TestMCPServer_CallToolExecution(t *testing.T) {
 
 	// Evaluate full file (line omitted)
 	resFull, err := clientSession.CallTool(ctx, &mcp.CallToolParams{
-		Name: "peek_eval",
+		Name: "peek_slice",
 		Arguments: map[string]any{
 			"file": pyFile,
 		},

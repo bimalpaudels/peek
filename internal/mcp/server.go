@@ -15,8 +15,8 @@ import (
 	"peek/internal/runner"
 )
 
-// EvalArgs defines the input schema for the peek_eval tool.
-type EvalArgs struct {
+// SliceArgs defines the input schema for the peek_slice tool.
+type SliceArgs struct {
 	File     string `json:"file" jsonschema:"Relative or absolute path to the target file (.py, .ts, .js)"`
 	Line     *int   `json:"line,omitempty" jsonschema:"Optional 1-indexed target line number. If omitted or null, evaluates all statements top-to-bottom."`
 	Timeout  *int   `json:"timeout,omitempty" jsonschema:"Optional execution timeout in seconds (overrides default config)."`
@@ -83,10 +83,10 @@ func (s *Server) RunTransport(ctx context.Context, t mcp.Transport) error {
 
 func (s *Server) registerTools() {
 	mcp.AddTool(s.mcpSrv, &mcp.Tool{
-		Name: "peek_eval",
+		Name: "peek_slice",
 		Description: "Evaluates a target line or an entire file in Python or TypeScript using AST dependency slicing. " +
 			"Runs required upstream dependencies and returns evaluated values and stdout without modifying the file on disk.",
-	}, s.handleEval)
+	}, s.handleSlice)
 }
 
 func (s *Server) registerResources() {
@@ -150,7 +150,7 @@ func (s *Server) registerResources() {
 	})
 }
 
-func (s *Server) handleEval(ctx context.Context, req *mcp.CallToolRequest, args EvalArgs) (*mcp.CallToolResult, any, error) {
+func (s *Server) handleSlice(ctx context.Context, req *mcp.CallToolRequest, args SliceArgs) (*mcp.CallToolResult, any, error) {
 	if strings.TrimSpace(args.File) == "" {
 		return &mcp.CallToolResult{
 			Content: []mcp.Content{
